@@ -1,0 +1,4 @@
+class Config {
+  static const String tmdbBearerToken = 'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlM2FhZjNjZjQ4NjZmMTdiM2UyMDBmOTViZjc5ODQ5NSIsIm5iZiI6MTc3ODIyOTk3MS4xMjYwMDAyLCJzdWIiOiI2OWZkYTJkMzBiNTE1MTk3MmMzNDdhOTYiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.HSdpyYxiQPalmHqxEkFNPqQIjyYWMDBFH-reXjqq0Og';
+  // youtubeApiKey removed – no longer used
+}

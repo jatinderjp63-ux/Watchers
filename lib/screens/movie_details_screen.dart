@@ -28,7 +28,8 @@ class MovieDetailsScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<MovieDetailsScreen> createState() => _MovieDetailsScreenState();
+  ConsumerState<MovieDetailsScreen> createState() =>
+      _MovieDetailsScreenState();
 }
 
 class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
@@ -481,41 +482,33 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
         }
 
         if (_isTv) {
-          return Column(
+          return Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: makeButton(
-                      label: 'Planned',
-                      icon: Icons.bookmark_add_outlined,
-                      status: MediaStatus.planning,
-                      color: const Color(0xFF4C8BF5),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: makeButton(
-                      label: 'Watched',
-                      icon: Icons.check_circle_outline,
-                      status: MediaStatus.watched,
-                      color: const Color(0xFF2EAF62),
-                    ),
-                  ),
-                ],
+              Expanded(
+                child: makeButton(
+                  label: 'Planned',
+                  icon: Icons.bookmark_add_outlined,
+                  status: MediaStatus.planning,
+                  color: const Color(0xFF4C8BF5),
+                ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: makeButton(
-                      label: 'Dropped',
-                      icon: Icons.close_outlined,
-                      status: MediaStatus.dropped,
-                      color: const Color(0xFFB00020),
-                    ),
-                  ),
-                ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: makeButton(
+                  label: 'Watched',
+                  icon: Icons.check_circle_outline,
+                  status: MediaStatus.watched,
+                  color: const Color(0xFF2EAF62),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: makeButton(
+                  label: 'Dropped',
+                  icon: Icons.close_outlined,
+                  status: MediaStatus.dropped,
+                  color: const Color(0xFFB00020),
+                ),
               ),
             ],
           );
@@ -1652,7 +1645,7 @@ class _SkeletonLine extends StatelessWidget {
   }
 }
 
-class _PremiumStatusButton extends StatelessWidget {
+class _PremiumStatusButton extends StatefulWidget {
   final String label;
   final IconData icon;
   final bool selected;
@@ -1668,63 +1661,178 @@ class _PremiumStatusButton extends StatelessWidget {
   });
 
   @override
+  State<_PremiumStatusButton> createState() =>
+      _PremiumStatusButtonState();
+}
+
+class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: selected
-              ? selectedColor
-              : scheme.outline.withValues(alpha: 0.35),
-          width: 1.2,
-        ),
-      ),
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: selected
-              ? selectedColor
-              : scheme.surface,
-          foregroundColor: selected
-              ? Colors.white
-              : scheme.onSurface,
-          padding: const EdgeInsets.symmetric(
-            vertical: 14,
-            horizontal: 12,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
-          elevation: 0,
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 18,
-              color: selected
-                  ? Colors.white
-                  : scheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: selected
-                      ? Colors.white
-                      : scheme.onSurface,
-                ),
+    final surfaceColor = widget.selected
+        ? Color.alphaBlend(
+            widget.selectedColor.withValues(alpha: 0.20),
+            scheme.surface,
+          )
+        : scheme.surface.withValues(alpha: 0.74);
+
+    final borderColor = widget.selected
+        ? widget.selectedColor.withValues(alpha: 0.85)
+        : scheme.outline.withValues(alpha: 0.20);
+
+    final iconSurface = widget.selected
+        ? widget.selectedColor.withValues(alpha: 0.22)
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.62);
+
+    final iconColor = widget.selected
+        ? widget.selectedColor
+        : scheme.onSurfaceVariant;
+
+    final labelColor = widget.selected
+        ? scheme.onSurface
+        : scheme.onSurfaceVariant;
+
+    return Semantics(
+      button: true,
+      label: widget.label,
+      selected: widget.selected,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) {
+          setState(() {
+            _pressed = true;
+          });
+        },
+        onTapCancel: () {
+          setState(() {
+            _pressed = false;
+          });
+        },
+        onTapUp: (_) {
+          setState(() {
+            _pressed = false;
+          });
+
+          widget.onPressed();
+        },
+        child: AnimatedScale(
+          scale: _pressed ? 0.965 : 1,
+          duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+            height: 84,
+            decoration: BoxDecoration(
+              color: surfaceColor,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: borderColor,
+                width: widget.selected ? 1.4 : 1,
               ),
+              boxShadow: widget.selected
+                  ? [
+                      BoxShadow(
+                        color: widget.selectedColor.withValues(
+                          alpha: 0.18,
+                        ),
+                        blurRadius: 22,
+                        spreadRadius: 1,
+                        offset: const Offset(0, 7),
+                      ),
+                    ]
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.14),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
             ),
-          ],
+            child: Stack(
+              children: [
+                if (widget.selected)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(21),
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.white.withValues(alpha: 0.08),
+                              Colors.transparent,
+                              widget.selectedColor.withValues(
+                                alpha: 0.08,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 240),
+                        curve: Curves.easeOutCubic,
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: iconSurface,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: widget.selected
+                                ? widget.selectedColor.withValues(
+                                    alpha: 0.48,
+                                  )
+                                : scheme.outline.withValues(
+                                    alpha: 0.18,
+                                  ),
+                          ),
+                          boxShadow: widget.selected
+                              ? [
+                                  BoxShadow(
+                                    color: widget.selectedColor.withValues(
+                                      alpha: 0.20,
+                                    ),
+                                    blurRadius: 10,
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Icon(
+                          widget.icon,
+                          size: 22,
+                          color: iconColor,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 240),
+                        curve: Curves.easeOutCubic,
+                        style: TextStyle(
+                          color: labelColor,
+                          fontSize: 11,
+                          fontWeight: widget.selected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                          letterSpacing: 0.18,
+                        ),
+                        child: Text(widget.label),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

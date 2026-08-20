@@ -8,12 +8,14 @@ class MovieCard extends StatelessWidget {
   final Movie movie;
   final String heroTag;
   final String sourceTab;
+  final bool showMediaType;
 
   const MovieCard({
     super.key,
     required this.movie,
     required this.heroTag,
     required this.sourceTab,
+    this.showMediaType = false,
   });
 
   String get _detailsPath {
@@ -43,6 +45,16 @@ class MovieCard extends StatelessWidget {
     return 'https://image.tmdb.org/t/p/w500$path';
   }
 
+  String get _mediaTypeLabel {
+    return movie.mediaType == 'tv' ? 'SHOW' : 'MOVIE';
+  }
+
+  Color _mediaTypeColor(ColorScheme scheme) {
+    return movie.mediaType == 'tv'
+        ? const Color(0xFF6BA6FF)
+        : const Color(0xFFE0A85B);
+  }
+
   Future<void> _openDetails(BuildContext context) async {
     final posterUrl = _posterUrl;
 
@@ -70,7 +82,8 @@ class MovieCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final posterUrl = _posterUrl;
-    final titleColor = Theme.of(context).colorScheme.onSurface;
+    final scheme = Theme.of(context).colorScheme;
+    final typeColor = _mediaTypeColor(scheme);
 
     return Material(
       color: Colors.transparent,
@@ -127,9 +140,37 @@ class MovieCard extends StatelessWidget {
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   height: 1.2,
-                  color: titleColor,
+                  color: scheme.onSurface,
                 ),
               ),
+              if (showMediaType) ...[
+                const SizedBox(height: 7),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: typeColor.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(
+                      color: typeColor.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: Text(
+                    _mediaTypeLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: typeColor,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      height: 1,
+                      letterSpacing: 1.05,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

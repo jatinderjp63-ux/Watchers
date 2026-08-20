@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import '../models/home_section_entry.dart';
 import '../models/movie.dart';
 import '../screens/account_screen.dart';
+import '../screens/actor_details_screen.dart';
+import '../screens/actor_filmography_screen.dart';
 import '../screens/discover_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/home_section_screen.dart';
@@ -53,6 +55,70 @@ Widget _detailsRoute(GoRouterState state) {
     movie: movie,
     heroTag: heroTag is String ? heroTag : '',
   );
+}
+
+Widget _actorRoute(GoRouterState state) {
+  final extra = state.extra;
+
+  if (extra is! Map<String, dynamic>) {
+    return const RouterErrorScreen(
+      message: 'Actor data is missing.',
+    );
+  }
+
+  final personId = extra['personId'];
+  final initialName = extra['initialName'];
+  final initialProfilePath = extra['initialProfilePath'];
+
+  if (personId is! int ||
+      personId <= 0 ||
+      initialName is! String ||
+      initialName.trim().isEmpty) {
+    return const RouterErrorScreen(
+      message: 'Actor data is invalid.',
+    );
+  }
+
+  return ActorDetailsScreen(
+    personId: personId,
+    initialName: initialName.trim(),
+    initialProfilePath:
+        initialProfilePath is String ? initialProfilePath : '',
+  );
+}
+
+Widget _actorFilmographyRoute(GoRouterState state) {
+  final extra = state.extra;
+
+  if (extra is! Map<String, dynamic>) {
+    return const RouterErrorScreen(
+      message: 'Filmography data is missing.',
+    );
+  }
+
+  final personName = extra['personName'];
+  final mediaType = extra['mediaType'];
+  final items = extra['items'];
+
+  if (personName is! String ||
+      (mediaType != 'movie' && mediaType != 'tv') ||
+      items is! List) {
+    return const RouterErrorScreen(
+      message: 'Filmography data is invalid.',
+    );
+  }
+
+  try {
+    return ActorFilmographyScreen(
+      personName: personName,
+      mediaType: mediaType,
+      items: items.cast<Movie>(),
+    );
+  } catch (_) {
+    return const RouterErrorScreen(
+      message: 'Filmography items are invalid.',
+    );
+  }
 }
 
 Widget _homeSectionRoute(GoRouterState state) {
@@ -188,6 +254,20 @@ final GoRouter appRouter = GoRouter(
                   builder: (context, state) {
                     return _detailsRoute(state);
                   },
+                ),
+                GoRoute(
+                  path: 'actor',
+                  builder: (context, state) {
+                    return _actorRoute(state);
+                  },
+                  routes: [
+                    GoRoute(
+                      path: 'filmography',
+                      builder: (context, state) {
+                        return _actorFilmographyRoute(state);
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),

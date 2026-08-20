@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/cast_member.dart';
@@ -16,6 +17,7 @@ import '../services/metadata_refresh_service.dart';
 import '../services/retry_helper.dart';
 import '../services/tmdb_service.dart';
 import '../providers/tv_progress_provider.dart';
+import 'episode_details_screen.dart';
 
 class MovieDetailsScreen extends ConsumerStatefulWidget {
   final Movie movie;
@@ -38,7 +40,7 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
   final MetadataRefreshService _cache = MetadataRefreshService.instance;
 
   MovieDetails? details;
-  List cast = [];
+  List<CastMember> cast = [];
   List<Map<String, dynamic>> trailers = [];
   List<Map<String, dynamic>> _seasonEpisodes = [];
 
@@ -53,6 +55,8 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
   int _tvAboutSection = 0;
   int? _selectedSeason;
   Future<MediaLibraryItem?>? _itemFuture;
+
+  final Map<String, int> _episodeCountCache = {};
 
   bool get _isTv => widget.movie.mediaType == 'tv';
 
@@ -573,6 +577,17 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
     );
   }
 
+  void _openActorDetails(CastMember actor) {
+    context.push(
+      '/discover/actor',
+      extra: {
+        'personId': actor.id,
+        'initialName': actor.name,
+        'initialProfilePath': actor.profilePath,
+      },
+    );
+  }
+
   Widget _buildCast() {
     final scheme = Theme.of(context).colorScheme;
 
@@ -591,51 +606,71 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
         crossAxisCount: 3,
         crossAxisSpacing: 12,
         mainAxisSpacing: 18,
-        mainAxisExtent: 178,
+        mainAxisExtent: 172,
       ),
       itemBuilder: (context, index) {
         final actor = cast[index];
 
-        return Column(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                width: double.infinity,
-                height: 108,
-                child: actor.profileUrl.isEmpty
-                    ? _personPlaceholder()
-                    : Image.network(
-                        actor.profileUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _personPlaceholder(),
-                      ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 32,
-              child: Text(
-                actor.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: scheme.onSurface,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _openActorDetails(actor),
+            borderRadius: BorderRadius.circular(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 108,
+                    child: actor.profileUrl.isEmpty
+                        ? _personPlaceholder()
+                        : Image.network(
+                            actor.profileUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                _personPlaceholder(),
+                          ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 32,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: Text(
+                      actor.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 12,
+                        height: 1.2,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 1),
+                SizedBox(
+                  height: 14,
+                  child: Text(
+                    actor.character,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 10,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              actor.character,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 10),
-            ),
-          ],
+          ),
         );
       },
     );
@@ -652,7 +687,7 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
         crossAxisCount: 3,
         crossAxisSpacing: 12,
         mainAxisSpacing: 18,
-        mainAxisExtent: 178,
+        mainAxisExtent: 172,
       ),
       itemBuilder: (_, __) {
         return Column(
@@ -665,9 +700,15 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            const _SkeletonLine(width: double.infinity),
-            const SizedBox(height: 4),
-            const _SkeletonLine(width: double.infinity),
+            const SizedBox(
+              height: 32,
+              child: _SkeletonLine(width: double.infinity),
+            ),
+            const SizedBox(height: 1),
+            const SizedBox(
+              height: 14,
+              child: _SkeletonLine(width: double.infinity),
+            ),
           ],
         );
       },
@@ -785,7 +826,9 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
       case 2:
         return _buildTrailers();
       default:
-        return details != null ? _buildOverview(movie!) : _buildOverviewSkeleton();
+        return details != null
+            ? _buildOverview(movie!)
+            : _buildOverviewSkeleton();
     }
   }
 
@@ -807,10 +850,31 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
     int selectedSeason,
     int episodeCount,
   ) {
-    if (progress == null || episodeCount == 0) return 0;
-    if (progress.currentSeason > selectedSeason) return episodeCount;
-    if (progress.currentSeason < selectedSeason) return 0;
-    return progress.currentEpisode.clamp(0, episodeCount);
+    if (progress == null || episodeCount == 0 || progress.totalSeasons == 0) {
+      return 0;
+    }
+
+    if (progress.currentSeason > selectedSeason) {
+      return episodeCount;
+    }
+
+    if (progress.currentSeason < selectedSeason) {
+      return 0;
+    }
+
+    int watchedUpToPreviousSeasons = 0;
+    for (var s = 1; s < selectedSeason; s++) {
+      final key = '${progress.id}:$s';
+      final count = _episodeCountCache[key] ?? 0;
+      watchedUpToPreviousSeasons += count;
+    }
+
+    final watchedInThisSeason =
+        progress.watchedEpisodes - watchedUpToPreviousSeasons;
+
+    if (watchedInThisSeason <= 0) return 0;
+    if (watchedInThisSeason >= episodeCount) return episodeCount;
+    return watchedInThisSeason;
   }
 
   Widget _buildTvEpisodes(
@@ -830,12 +894,19 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
 
     final selectedSeason = _selectedSeason ?? 1;
     final episodeCount = _seasonEpisodes.length;
+
+    if (episodeCount > 0) {
+      final key = '${progressItem?.id ?? widget.movie.id}:$selectedSeason';
+      _episodeCountCache[key] = episodeCount;
+    }
+
     final watchedInSeason = _watchedInSelectedSeason(
       progressItem,
       selectedSeason,
       episodeCount,
     );
-    final isSeasonWatched = episodeCount > 0 && watchedInSeason >= episodeCount;
+    final isSeasonWatched =
+        episodeCount > 0 && watchedInSeason >= episodeCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -920,24 +991,19 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
             selected: isSeasonWatched,
             onPressed: () async {
               await _ensureShowInProgress();
-              await notifier.toggleSeasonWatched(widget.movie.id, selectedSeason);
+              await notifier.toggleSeasonWatched(
+                widget.movie.id,
+                selectedSeason,
+              );
             },
           ),
         ),
-        const SizedBox(height: 10),
-        Center(
-          child: Text(
-            episodeCount == 0
-                ? 'Loading season progress'
-                : '$watchedInSeason of $episodeCount episodes watched',
-            style: TextStyle(
-              color: scheme.onSurfaceVariant,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+        const SizedBox(height: 14),
+        _SeasonProgressMeter(
+          watchedEpisodes: watchedInSeason,
+          totalEpisodes: episodeCount,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 20),
         if (_episodesLoading)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 28),
@@ -973,11 +1039,21 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
 
               return InkWell(
                 onTap: () {
-                  // Episode details navigation will be added later.
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => EpisodeDetailsScreen(
+                        show: widget.movie,
+                        seasonNumber: selectedSeason,
+                        episodeNumber: episodeNumber,
+                        episode: Map<String, dynamic>.from(episode),
+                      ),
+                    ),
+                  );
                 },
                 borderRadius: BorderRadius.circular(16),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
                   child: Row(
                     children: [
                       ClipRRect(
@@ -1395,12 +1471,14 @@ class _SegmentSelector extends StatelessWidget {
       child: Row(
         children: List.generate(labels.length, (index) {
           final selected = selectedIndex == index;
+
           return Expanded(
             child: GestureDetector(
               onTap: () => onSelected(index),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                 decoration: BoxDecoration(
                   color: selected ? scheme.primary : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
@@ -1431,6 +1509,7 @@ class _SkeletonLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     return Container(
       height: 14,
       width: width,
@@ -1479,8 +1558,10 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
     final iconSurface = widget.selected
         ? widget.selectedColor.withValues(alpha: 0.22)
         : scheme.surfaceContainerHighest.withValues(alpha: 0.62);
-    final iconColor = widget.selected ? widget.selectedColor : scheme.onSurfaceVariant;
-    final labelColor = widget.selected ? scheme.onSurface : scheme.onSurfaceVariant;
+    final iconColor =
+        widget.selected ? widget.selectedColor : scheme.onSurfaceVariant;
+    final labelColor =
+        widget.selected ? scheme.onSurface : scheme.onSurfaceVariant;
 
     return Semantics(
       button: true,
@@ -1567,7 +1648,8 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
                           boxShadow: widget.selected
                               ? [
                                   BoxShadow(
-                                    color: widget.selectedColor.withValues(alpha: 0.20),
+                                    color: widget.selectedColor
+                                        .withValues(alpha: 0.20),
                                     blurRadius: 10,
                                   ),
                                 ]
@@ -1582,7 +1664,9 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
                         style: TextStyle(
                           color: labelColor,
                           fontSize: 11,
-                          fontWeight: widget.selected ? FontWeight.w700 : FontWeight.w600,
+                          fontWeight: widget.selected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
                           letterSpacing: 0.18,
                         ),
                         child: Text(widget.label),
@@ -1673,7 +1757,9 @@ class _SeasonProgressButtonState extends State<_SeasonProgressButton> {
               Text(
                 widget.selected ? 'Season Watched' : 'Mark Season Watched',
                 style: TextStyle(
-                  color: widget.selected ? scheme.onSurface : scheme.onSurfaceVariant,
+                  color: widget.selected
+                      ? scheme.onSurface
+                      : scheme.onSurfaceVariant,
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
                 ),
@@ -1681,6 +1767,125 @@ class _SeasonProgressButtonState extends State<_SeasonProgressButton> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SeasonProgressMeter extends StatelessWidget {
+  final int watchedEpisodes;
+  final int totalEpisodes;
+
+  const _SeasonProgressMeter({
+    required this.watchedEpisodes,
+    required this.totalEpisodes,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    const watchedColor = Color(0xFF2EAF62);
+
+    final safeTotal = totalEpisodes < 0 ? 0 : totalEpisodes;
+    final safeWatched = safeTotal == 0
+        ? 0
+        : watchedEpisodes.clamp(0, safeTotal);
+    final progress = safeTotal == 0 ? 0.0 : safeWatched / safeTotal;
+    final complete = safeTotal > 0 && safeWatched >= safeTotal;
+
+    final label = safeTotal == 0
+        ? 'Loading season progress'
+        : complete
+            ? 'Season complete'
+            : '$safeWatched / $safeTotal watched';
+
+    return Semantics(
+      label: safeTotal == 0
+          ? 'Loading season progress'
+          : '$safeWatched of $safeTotal episodes watched',
+      value: safeTotal == 0 ? null : '${(progress * 100).round()} percent',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                complete
+                    ? Icons.check_circle_rounded
+                    : Icons.play_circle_outline_rounded,
+                size: 15,
+                color: complete ? watchedColor : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: TextStyle(
+                  color: complete ? watchedColor : scheme.onSurfaceVariant,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              if (safeTotal > 0)
+                Text(
+                  '${(progress * 100).round()}%',
+                  style: TextStyle(
+                    color: complete ? watchedColor : scheme.onSurfaceVariant,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: SizedBox(
+              height: 9,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
+                    color: scheme.surfaceContainerHighest.withValues(
+                      alpha: 0.82,
+                    ),
+                  ),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: progress),
+                    duration: const Duration(milliseconds: 420),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, _) {
+                      return Align(
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: value,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  watchedColor.withValues(alpha: 0.72),
+                                  watchedColor,
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(99),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: watchedColor.withValues(alpha: 0.40),
+                                  blurRadius: 9,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1742,7 +1947,9 @@ class _EpisodeWatchedButtonState extends State<_EpisodeWatchedButton> {
                 : null,
           ),
           child: Icon(
-            widget.selected ? Icons.check_rounded : Icons.check_circle_outline_rounded,
+            widget.selected
+                ? Icons.check_rounded
+                : Icons.check_circle_outline_rounded,
             size: 21,
             color: widget.selected ? watchedColor : scheme.onSurfaceVariant,
           ),

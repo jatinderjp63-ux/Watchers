@@ -1,9 +1,12 @@
 import 'dart:math';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../models/movie.dart';
+import '../models/person.dart';
 import '../providers/tmdb_service_provider.dart';
 import '../services/retry_helper.dart';
 import '../services/tab_navigation_service.dart';
@@ -25,6 +28,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
   List<Movie> discoverItems = [];
   List<Movie> searchResults = [];
+  List<Person> personResults = [];
 
   bool isSearching = false;
   bool isLoadingDiscover = false;
@@ -55,13 +59,14 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     final service = ref.read(tmdbServiceProvider);
 
     try {
-      final results = await retryCall<List<List<Movie>>>(() => Future.wait<List<Movie>>([
-            service.getPopularMovies(),
-            service.getPopularTvShows(),
-            service.getTopRatedMovies(),
-            service.getTopRatedTvShows(),
-            service.getTrendingMovies(),
-          ]));
+      final results =
+          await retryCall<List<List<Movie>>>(() => Future.wait<List<Movie>>([
+                service.getPopularMovies(),
+                service.getPopularTvShows(),
+                service.getTopRatedMovies(),
+                service.getTopRatedTvShows(),
+                service.getTrendingMovies(),
+              ]));
 
       final combined = results.expand((items) => items).toList();
 
@@ -99,10 +104,12 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     if (query.isEmpty) {
       if (!mounted) return;
+
       setState(() {
         isSearching = false;
         isLoadingSearch = false;
         searchResults = [];
+        personResults = [];
         searchError = null;
       });
       return;
@@ -121,13 +128,21 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       if (searchController.text.trim() != query) return;
 
       try {
-        final results = await retryCall<List<Movie>>(() =>
-            ref.read(tmdbServiceProvider).searchMovies(query));
+        final service = ref.read(tmdbServiceProvider);
+
+        final results = await retryCall<List<dynamic>>(
+          () => Future.wait<dynamic>([
+            service.searchMovies(query),
+            service.searchPeople(query),
+          ]),
+        );
 
         if (!mounted) return;
+        if (searchController.text.trim() != query) return;
 
         setState(() {
-          searchResults = results;
+          searchResults = results[0] as List<Movie>;
+          personResults = results[1] as List<Person>;
           isLoadingSearch = false;
         });
       } catch (_) {
@@ -135,6 +150,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
         setState(() {
           searchResults = [];
+          personResults = [];
           searchError = 'Search failed.';
           isLoadingSearch = false;
         });
@@ -159,13 +175,14 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     final service = ref.read(tmdbServiceProvider);
 
     try {
-      final results = await retryCall<List<List<Movie>>>(() => Future.wait<List<Movie>>([
-            service.getPopularMovies(),
-            service.getPopularTvShows(),
-            service.getTopRatedMovies(),
-            service.getTopRatedTvShows(),
-            service.getTrendingMovies(),
-          ]));
+      final results =
+          await retryCall<List<List<Movie>>>(() => Future.wait<List<Movie>>([
+                service.getPopularMovies(),
+                service.getPopularTvShows(),
+                service.getTopRatedMovies(),
+                service.getTopRatedTvShows(),
+                service.getTrendingMovies(),
+              ]));
 
       final combined = results.expand((items) => items).toList();
 
@@ -205,6 +222,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
     setState(() {
       searchResults = [];
+      personResults = [];
       isSearching = false;
       isLoadingSearch = false;
       searchError = null;
@@ -222,7 +240,10 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     );
   }
 
-  Widget _buildGrid(List<Movie> movies) {
+  Widget _buildGrid(
+    List<Movie> movies, {
+    bool showMediaType = false,
+  }) {
     if (movies.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -233,66 +254,141 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
         itemCount: movies.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
           mainAxisSpacing: 16,
           crossAxisSpacing: 12,
-          childAspectRatio: 0.53,
+          childAspectRatio: showMediaType ? 0.44 : 0.53,
         ),
         itemBuilder: (context, index) {
           final movie = movies[index];
+
           return MovieCard(
             movie: movie,
             heroTag: 'discover-${movie.mediaType}-${movie.id}-$index',
             sourceTab: 'discover',
+            showMediaType: showMediaType,
           );
         },
       ),
     );
   }
 
-  Widget _buildBody() {
-    if (isSearching) {
-      if (isLoadingSearch) {
-        return const Padding(
-          padding: EdgeInsets.symmetric(vertical: 48),
-          child: Center(
-            child: CircularProgressIndicator(),
-          ),
-        );
-      }
+  Widget _buildPeopleSection() {
+    if (personResults.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
-      if (searchError != null) {
-        return _RetryMessage(
-          message: searchError!,
-          onRetry: () => _search(searchController.text),
-        );
-      }
+    final scheme = Theme.of(context).colorScheme;
 
-      if (searchResults.isEmpty) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 48,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'People',
+            style: TextStyle(
+              color: scheme.onSurface,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          child: Center(
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 142,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: personResults.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (context, index) {
+                final person = personResults[index];
+
+                return _PersonSearchCard(
+                  person: person,
+                  onTap: () {
+                    context.push(
+                      '/discover/actor',
+                      extra: {
+                        'personId': person.id,
+                        'initialName': person.name,
+                        'initialProfilePath': person.profilePath,
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBody() {
+    if (isLoadingSearch) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 48),
+        child: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    if (searchError != null) {
+      return _RetryMessage(
+        message: searchError!,
+        onRetry: () => _search(searchController.text),
+      );
+    }
+
+    if (personResults.isEmpty && searchResults.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 24,
+          vertical: 48,
+        ),
+        child: Center(
+          child: Text(
+            'No results found.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildPeopleSection(),
+        if (searchResults.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'No results found.',
+              'Titles',
               style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
-        );
-      }
+        _buildGrid(
+          searchResults,
+          showMediaType: true,
+        ),
+      ],
+    );
+  }
 
-      return _buildGrid(searchResults);
+  Widget _buildBody() {
+    if (isSearching) {
+      return _buildSearchBody();
     }
 
-    // For discover feed, always show the grid (with placeholders in cards)
-    // instead of a full-page loader. This avoids the "loading animation first"
-    // effect and makes the UI feel instant.
     if (discoverError != null) {
       return _RetryMessage(
         message: discoverError!,
@@ -308,7 +404,6 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
     }
 
     if (discoverItems.isEmpty && isLoadingDiscover) {
-      // Optional: show a one-time loader only on very first load.
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 48),
         child: Center(
@@ -384,13 +479,19 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
                   onChanged: _search,
                   style: TextStyle(color: colorScheme.onSurface),
                   decoration: InputDecoration(
-                    hintText: 'Search movies or TV shows',
+                    hintText: 'Search movies, TV shows, or people',
                     hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
-                    prefixIcon: Icon(Icons.search, color: colorScheme.onSurfaceVariant),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                     suffixIcon: hasText
                         ? IconButton(
                             onPressed: clearSearch,
-                            icon: Icon(Icons.clear, color: colorScheme.onSurfaceVariant),
+                            icon: Icon(
+                              Icons.clear,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                           )
                         : null,
                     filled: true,
@@ -404,6 +505,110 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
               const SizedBox(height: 20),
               _buildBody(),
               const SizedBox(height: 30),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PersonSearchCard extends StatelessWidget {
+  final Person person;
+  final VoidCallback onTap;
+
+  const _PersonSearchCard({
+    required this.person,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final imageUrl = person.profileUrl;
+
+    return SizedBox(
+      width: 100,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 100,
+                  height: 92,
+                  child: imageUrl == null
+                      ? Container(
+                          color: scheme.surfaceContainerHighest,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.person,
+                            color: scheme.onSurfaceVariant,
+                            size: 34,
+                          ),
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: imageUrl,
+                          fit: BoxFit.cover,
+                          fadeInDuration: Duration.zero,
+                          placeholder: (_, __) {
+                            return Container(
+                              color: scheme.surfaceContainerHighest,
+                            );
+                          },
+                          errorWidget: (_, __, ___) {
+                            return Container(
+                              color: scheme.surfaceContainerHighest,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.person,
+                                color: scheme.onSurfaceVariant,
+                                size: 34,
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                person.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: scheme.onSurface,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: scheme.primary.withValues(alpha: 0.38),
+                  ),
+                ),
+                child: Text(
+                  'ACTOR',
+                  style: TextStyle(
+                    color: scheme.primary,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
             ],
           ),
         ),

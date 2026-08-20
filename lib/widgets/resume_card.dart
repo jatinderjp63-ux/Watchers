@@ -1,154 +1,174 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
-import '../models/tv_progress.dart';
+import '../models/movie.dart';
 
-class ResumeCard extends StatelessWidget {
-  final TvProgress show;
-  final VoidCallback? onTap;
+class MovieCard extends StatelessWidget {
+  final Movie movie;
+  final String heroTag;
+  final String sourceTab;
+  final bool showMediaType;
 
-  const ResumeCard({
+  const MovieCard({
     super.key,
-    required this.show,
-    this.onTap,
+    required this.movie,
+    required this.heroTag,
+    required this.sourceTab,
+    this.showMediaType = false,
   });
+
+  String get _detailsPath {
+    switch (sourceTab) {
+      case 'library':
+        return '/library/details';
+      case 'profile':
+        return '/profile/details';
+      case 'discover':
+        return '/discover/details';
+      default:
+        return '/home/details';
+    }
+  }
+
+  String? get _posterUrl {
+    final path = movie.posterPath.trim();
+
+    if (path.isEmpty) {
+      return null;
+    }
+
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+
+    return 'https://image.tmdb.org/t/p/w500$path';
+  }
+
+  String get _mediaTypeLabel {
+    return movie.mediaType == 'tv' ? 'Show' : 'Movie';
+  }
+
+  Future<void> _openDetails(BuildContext context) async {
+    final posterUrl = _posterUrl;
+
+    if (posterUrl != null) {
+      await precacheImage(
+        CachedNetworkImageProvider(posterUrl),
+        context,
+      );
+    }
+
+    if (!context.mounted) {
+      return;
+    }
+
+    context.push(
+      _detailsPath,
+      extra: {
+        'movie': movie,
+        'heroTag': heroTag,
+        'sourceTab': sourceTab,
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final posterUrl = show.posterPath.isEmpty
-        ? null
-        : "https://image.tmdb.org/t/p/w500${show.posterPath}";
-
-    final subtitleColor = Theme.of(context).colorScheme.onSurfaceVariant;
-    final progressText =
-        "${show.watchedEpisodes}/${show.totalEpisodes > 0 ? show.totalEpisodes : "?"} episodes";
-    final statusLabel = show.isFinished ? "Status" : "Next episode";
+    final posterUrl = _posterUrl;
+    final scheme = Theme.of(context).colorScheme;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          width: 240,
-          margin: const EdgeInsets.only(right: 12),
-          child: Card(
-            margin: EdgeInsets.zero,
-            clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _openDetails(context),
+        child: SizedBox(
+          width: double.infinity,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Hero(
+                tag: heroTag,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: AspectRatio(
+                    aspectRatio: 2 / 3,
                     child: posterUrl == null
-                        ? _posterPlaceholder(context)
+                        ? _posterPlaceholder(
+                            context,
+                            Icons.movie_outlined,
+                          )
                         : CachedNetworkImage(
                             imageUrl: posterUrl,
-                            width: 54,
-                            height: 78,
+                            width: double.infinity,
+                            height: double.infinity,
                             fit: BoxFit.cover,
-                            placeholder: (context, url) => _posterLoading(context),
-                            errorWidget: (context, url, error) =>
-                                _posterPlaceholder(context),
+                            placeholder: (context, url) {
+                              return _posterPlaceholder(
+                                context,
+                                Icons.movie_outlined,
+                              );
+                            },
+                            errorWidget: (context, url, error) {
+                              return _posterPlaceholder(
+                                context,
+                                Icons.broken_image_outlined,
+                              );
+                            },
+                            fadeInDuration: const Duration(
+                              milliseconds: 150,
+                            ),
                           ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          show.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          statusLabel,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: subtitleColor,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          show.nextEpisodeLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            value: show.progress,
-                            minHeight: 5,
-                            backgroundColor:
-                                Theme.of(context).colorScheme.surfaceContainerHighest,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          progressText,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: subtitleColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+              const SizedBox(height: 8),
+              Text(
+                movie.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                  color: scheme.onSurface,
+                ),
+              ),
+              if (showMediaType) ...[
+                const SizedBox(height: 3),
+                Text(
+                  _mediaTypeLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _posterLoading(BuildContext context) {
+  Widget _posterPlaceholder(
+    BuildContext context,
+    IconData icon,
+  ) {
     return Container(
-      width: 54,
-      height: 78,
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: const Center(
-        child: SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _posterPlaceholder(BuildContext context) {
-    return Container(
-      width: 54,
-      height: 78,
+      width: double.infinity,
+      height: double.infinity,
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Center(
         child: Icon(
-          Icons.broken_image_outlined,
-          size: 20,
+          icon,
+          size: 30,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),

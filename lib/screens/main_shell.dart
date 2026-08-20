@@ -84,27 +84,70 @@ class MainShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      extendBody: true,
-      body: navigationShell,
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            14,
-            0,
-            14,
-            14,
-          ),
-          child: _PremiumPillNavigationBar(
-            currentIndex: navigationShell.currentIndex,
-            onSelected: (index) {
-              _onTabSelected(context, index);
-            },
+    return PopScope(
+      // Allow the system to handle back only if the current branch
+      // cannot pop. This prevents the app from exiting when a details
+      // or actor page is open.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          return;
+        }
+
+        final branchKey = _branchNavigatorKey(
+          navigationShell.currentIndex,
+        );
+
+        if (branchKey == null) {
+          return;
+        }
+
+        final branchNavigator = branchKey.currentState;
+        if (branchNavigator == null) {
+          return;
+        }
+
+        if (branchNavigator.canPop()) {
+          branchNavigator.maybePop();
+        }
+      },
+      child: Scaffold(
+        extendBody: true,
+        body: navigationShell,
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              14,
+              0,
+              14,
+              14,
+            ),
+            child: _PremiumPillNavigationBar(
+              currentIndex: navigationShell.currentIndex,
+              onSelected: (index) {
+                _onTabSelected(context, index);
+              },
+            ),
           ),
         ),
       ),
     );
+  }
+
+  GlobalKey<NavigatorState>? _branchNavigatorKey(int index) {
+    switch (index) {
+      case 0:
+        return homeNavigatorKey;
+      case 1:
+        return libraryNavigatorKey;
+      case 2:
+        return discoverNavigatorKey;
+      case 3:
+        return profileNavigatorKey;
+      default:
+        return null;
+    }
   }
 }
 

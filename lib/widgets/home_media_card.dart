@@ -15,6 +15,7 @@ class HomeMediaCard extends StatelessWidget {
   final double cardWidth;
 
   const HomeMediaCard({
+    super.key,
     required this.movie,
     required this.heroTag,
     required this.primaryText,
@@ -22,7 +23,7 @@ class HomeMediaCard extends StatelessWidget {
     this.tertiaryText,
     this.isWatched = false,
     required this.sourceTab,
-    required this.cardWidth,
+    this.cardWidth = 112,
   });
 
   String get _detailsPath {
@@ -52,20 +53,16 @@ class HomeMediaCard extends StatelessWidget {
     return 'https://image.tmdb.org/t/p/w500$path';
   }
 
-  Future<void> _openDetails(BuildContext context) async {
+  void _openDetails(BuildContext context) {
     final posterUrl = _posterUrl;
 
+    // Best-effort precache only. Routing must never wait for a network
+    // request or image decode.
     if (posterUrl != null) {
-      // Uses the same cached-image provider as the visible card. This starts
-      // decoding the poster before the route transition without changing UI.
-      await precacheImage(
+      precacheImage(
         CachedNetworkImageProvider(posterUrl),
         context,
-      );
-    }
-
-    if (!context.mounted) {
-      return;
+      ).catchError((_) {});
     }
 
     context.push(
@@ -81,8 +78,9 @@ class HomeMediaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final posterUrl = _posterUrl;
-    final titleColor = Theme.of(context).colorScheme.onSurface;
-    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    final scheme = Theme.of(context).colorScheme;
+    final titleColor = scheme.onSurface;
+    final mutedColor = scheme.onSurfaceVariant;
 
     return Material(
       color: Colors.transparent,
@@ -92,89 +90,116 @@ class HomeMediaCard extends StatelessWidget {
         child: SizedBox(
           width: cardWidth,
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Hero(
-                tag: heroTag,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: AspectRatio(
-                    aspectRatio: 2 / 3,
-                    child: posterUrl == null
-                        ? _posterPlaceholder(
-                            context,
-                            Icons.movie_outlined,
-                          )
-                        : CachedNetworkImage(
-                            imageUrl: posterUrl,
-                            width: double.infinity,
-                            height: double.infinity,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) {
-                              return _posterPlaceholder(
+              Stack(
+                children: [
+                  Hero(
+                    tag: heroTag,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: AspectRatio(
+                        aspectRatio: 2 / 3,
+                        child: posterUrl == null
+                            ? _posterPlaceholder(
                                 context,
                                 Icons.movie_outlined,
-                              );
-                            },
-                            errorWidget: (context, url, error) {
-                              return _posterPlaceholder(
-                                context,
-                                Icons.broken_image_outlined,
-                              );
-                            },
-                            fadeInDuration: const Duration(
-                              milliseconds: 150,
-                            ),
-                          ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      primaryText,
-                      maxLines: tertiaryText == null ? 3 : 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        height: 1.2,
-                        color: titleColor,
+                              )
+                            : CachedNetworkImage(
+                                imageUrl: posterUrl,
+                                width: double.infinity,
+                                height: double.infinity,
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) {
+                                  return _posterPlaceholder(
+                                    context,
+                                    Icons.movie_outlined,
+                                  );
+                                },
+                                errorWidget: (_, __, ___) {
+                                  return _posterPlaceholder(
+                                    context,
+                                    Icons.broken_image_outlined,
+                                  );
+                                },
+                                fadeInDuration: const Duration(
+                                  milliseconds: 150,
+                                ),
+                              ),
                       ),
                     ),
-                    if (secondaryText != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        secondaryText!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: mutedColor,
-                          fontWeight: FontWeight.w500,
-                          height: 1.2,
+                  ),
+                  if (isWatched)
+                    Positioned(
+                      top: 7,
+                      right: 7,
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2EAF62),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            width: 1.4,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.28),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.check_rounded,
+                          size: 18,
+                          color: Colors.white,
                         ),
                       ),
-                    ],
-                    if (tertiaryText != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        tertiaryText!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: mutedColor,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                  ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                primaryText,
+                maxLines: tertiaryText == null ? 2 : 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                  color: titleColor,
                 ),
               ),
+              if (secondaryText != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  secondaryText!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: mutedColor,
+                    fontWeight: FontWeight.w500,
+                    height: 1.2,
+                  ),
+                ),
+              ],
+              if (tertiaryText != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  tertiaryText!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: mutedColor,
+                    height: 1.2,
+                  ),
+                ),
+              ],
             ],
           ),
         ),

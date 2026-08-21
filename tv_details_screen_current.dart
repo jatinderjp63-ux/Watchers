@@ -752,7 +752,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
             ? _buildShowOverview(show!)
             : _buildOverviewSkeleton();
     }
-  }  int _watchedInSelectedSeason(
+  }
+
+  int _watchedInSelectedSeason(
     TvProgress? progress,
     int selectedSeason,
     int episodeCount,
@@ -942,10 +944,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
               final title = (episode['name'] as String?)?.trim() ??
                   'Episode $episodeNumber';
               final stillPath = episode['still_path'] as String?;
-
-              final episodeKey = '${widget.show.id}:s${selectedSeason}e$episodeNumber';
-
-final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false;
+              final isWatched = watchedInSeason >= episodeNumber;
 
               return InkWell(
                 onTap: () {
@@ -1294,7 +1293,9 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
 
     return _buildTvPage();
   }
-}// -------------------------- Helper Widgets --------------------------
+}
+
+// -------------------------- Helper Widgets --------------------------
 
 class _SegmentSelector extends StatelessWidget {
   final List<String> labels;
@@ -1739,7 +1740,9 @@ class _SeasonProgressMeter extends StatelessWidget {
       ),
     );
   }
-}class _EpisodeWatchedButton extends StatefulWidget {
+}
+
+class _EpisodeWatchedButton extends StatefulWidget {
   final bool selected;
   final VoidCallback onPressed;
 

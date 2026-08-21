@@ -55,18 +55,15 @@ class MovieCard extends StatelessWidget {
         : const Color(0xFFE0A85B);
   }
 
-  Future<void> _openDetails(BuildContext context) async {
+  void _openDetails(BuildContext context) {
     final posterUrl = _posterUrl;
 
+    // Navigation must not wait for poster networking/decoding.
     if (posterUrl != null) {
-      await precacheImage(
+      precacheImage(
         CachedNetworkImageProvider(posterUrl),
         context,
-      );
-    }
-
-    if (!context.mounted) {
-      return;
+      ).catchError((_) {});
     }
 
     context.push(
@@ -112,13 +109,13 @@ class MovieCard extends StatelessWidget {
                             width: double.infinity,
                             height: double.infinity,
                             fit: BoxFit.cover,
-                            placeholder: (context, url) {
+                            placeholder: (_, __) {
                               return _posterPlaceholder(
                                 context,
                                 Icons.movie_outlined,
                               );
                             },
-                            errorWidget: (context, url, error) {
+                            errorWidget: (_, __, ___) {
                               return _posterPlaceholder(
                                 context,
                                 Icons.broken_image_outlined,

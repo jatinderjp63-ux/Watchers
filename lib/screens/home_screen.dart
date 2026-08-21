@@ -26,11 +26,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   final ScrollController _scrollController = ScrollController();
 
   static const int _previewCount = 6;
+  static const double _cardWidth = 112;
+  static const double _cardHeight = 238;
 
   @override
   void initState() {
     super.initState();
-
     TabNavigationService.homeTapSignal.addListener(_scrollToTop);
   }
 
@@ -56,9 +57,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final library = ref.watch(libraryProvider);
-    final tvProgress = ref.watch(tvProgressProvider);
+    final progressItems = ref.watch(tvProgressProvider);
     final nextAiringAsync = ref.watch(nextAiringProvider);
-
     final upcomingMovies = _buildUpcomingMovies(library);
 
     return SafeArea(
@@ -89,36 +89,32 @@ class _HomePageState extends ConsumerState<HomePage> {
               skipLoadingOnRefresh: true,
               skipLoadingOnReload: true,
               loading: () {
-                return _buildHomeWithResume(
+                return _buildWithResume(
                   context,
                   library: library,
-                  tvProgress: tvProgress,
+                  progressItems: progressItems,
                   upcomingMovies: upcomingMovies,
-                  airingItems: const [],
-                  resumeItems: const [],
+                  airingItems: const <HomeSectionEntry>[],
                   isAiringLoading: true,
-                  isResumeLoading: true,
                 );
               },
               error: (_, __) {
-                return _buildHomeWithResume(
+                return _buildWithResume(
                   context,
                   library: library,
-                  tvProgress: tvProgress,
+                  progressItems: progressItems,
                   upcomingMovies: upcomingMovies,
-                  airingItems: const [],
-                  resumeItems: const [],
+                  airingItems: const <HomeSectionEntry>[],
                   showAiringError: true,
                 );
               },
               data: (items) {
-                return _buildHomeWithResume(
+                return _buildWithResume(
                   context,
                   library: library,
-                  tvProgress: tvProgress,
+                  progressItems: progressItems,
                   upcomingMovies: upcomingMovies,
                   airingItems: _buildAiringEntries(items),
-                  resumeItems: _buildResumeEntries(library, tvProgress),
                 );
               },
             ),
@@ -129,44 +125,58 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _buildHomeWithResume(
+  Widget _buildWithResume(
     BuildContext context, {
     required List<MediaLibraryItem> library,
-    required List<TvProgress> tvProgress,
+    required List<TvProgress> progressItems,
     required List<HomeSectionEntry> upcomingMovies,
     required List<HomeSectionEntry> airingItems,
-    required List<HomeSectionEntry> resumeItems,
     bool isAiringLoading = false,
-    bool isResumeLoading = false,
     bool showAiringError = false,
   }) {
-    final isAiringEmpty = airingItems.isEmpty && !showAiringError && !isAiringLoading;
-    final isResumeEmpty = resumeItems.isEmpty && !isResumeLoading;
+    return FutureBuilder<List<HomeSectionEntry>>(
+      future: _buildResumeEntries(
+        library: library,
+        progressItems: progressItems,
+      ),
+      builder: (context, snapshot) {
+        final resumeItems = snapshot.data ?? const <HomeSectionEntry>[];
+        final isResumeLoading =
+            snapshot.connectionState == ConnectionState.waiting;
 
-    final hasAnySection =
-        airingItems.isNotEmpty ||
+        return _buildContent(
+          context,
+          airingItems: airingItems,
+          upcomingMovies: upcomingMovies,
+          resumeItems: resumeItems,
+          isAiringLoading: isAiringLoading,
+          isResumeLoading: isResumeLoading,
+          showAiringError: showAiringError,
+        );
+      },
+    );
+  }
+
+  Widget _buildContent(
+    BuildContext context, {
+    required List<HomeSectionEntry> airingItems,
+    required List<HomeSectionEntry> upcomingMovies,
+    required List<HomeSectionEntry> resumeItems,
+    required bool isAiringLoading,
+    required bool isResumeLoading,
+    required bool showAiringError,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasAnySection = airingItems.isNotEmpty ||
         upcomingMovies.isNotEmpty ||
         resumeItems.isNotEmpty;
-
-    if (isAiringLoading && isResumeLoading && upcomingMovies.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    final scheme = Theme.of(context).colorScheme;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (showAiringError)
           _ErrorBlock(
-            onRetry: () {
-              ref.invalidate(nextAiringProvider);
-            },
+            onRetry: () => ref.invalidate(nextAiringProvider),
           ),
         if (!hasAnySection &&
             !showAiringError &&
@@ -177,8 +187,8 @@ class _HomePageState extends ConsumerState<HomePage> {
             icon: Icons.home_outlined,
             title: 'Nothing on Home yet',
             subtitle:
-                'Upcoming episodes, planned movies, '
-                'and shows to resume will appear here.',
+                'Upcoming episodes, planned movies, and shows to resume '
+                'will appear here.',
           ),
         if (airingItems.isNotEmpty)
           _buildSection(
@@ -186,7 +196,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             title: 'Airing',
             items: airingItems,
           ),
-        if (isAiringEmpty)
+        if (airingItems.isEmpty &&
+            !showAiringError &&
+            !isAiringLoading)
           _buildAiringEmptyState(context, scheme: scheme),
         if (upcomingMovies.isNotEmpty)
           _buildSection(
@@ -221,8 +233,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         movie: item.show,
         heroTag:
             'home-airing-${item.show.id}-'
-            '${item.seasonNumber}-'
-            '${item.episodeNumber}',
+            '${item.seasonNumber}-${item.episodeNumber}',
         primaryText: _episodeLabel(
           season: item.seasonNumber,
           episode: item.episodeNumber,
@@ -234,32 +245,21 @@ class _HomePageState extends ConsumerState<HomePage> {
     }).toList();
   }
 
-  List<HomeSectionEntry> _buildResumeEntries(
-    List<MediaLibraryItem> library,
-    List<TvProgress> progressItems,
-  ) {
-    final activeShowIds = library
-        .where(
-          (item) =>
-              item.mediaType == 'tv' &&
-              item.status != MediaStatus.dropped,
-        )
-        .map((item) => item.id)
-        .toSet();
-
-    final itemById = <int, MediaLibraryItem>{
-      for (final item in library) item.id: item,
+  Future<List<HomeSectionEntry>> _buildResumeEntries({
+    required List<MediaLibraryItem> library,
+    required List<TvProgress> progressItems,
+  }) async {
+    final activeItemById = <int, MediaLibraryItem>{
+      for (final item in library)
+        if (item.mediaType == 'tv' &&
+            item.status != MediaStatus.dropped)
+          item.id: item,
     };
 
-    final notifier = ref.read(tvProgressProvider.notifier);
-
-    final startedShows = progressItems
-        .where(
-          (progress) =>
-              activeShowIds.contains(progress.id) &&
-              progress.watchedEpisodes > 0,
-        )
-        .toList()
+    final startedProgress = progressItems.where((progress) {
+      return activeItemById.containsKey(progress.id) &&
+          progress.watchedEpisodeKeys.isNotEmpty;
+    }).toList()
       ..sort((a, b) {
         final aTime = a.lastWatchedAt;
         final bTime = b.lastWatchedAt;
@@ -281,24 +281,39 @@ class _HomePageState extends ConsumerState<HomePage> {
             );
       });
 
+    final notifier = ref.read(tvProgressProvider.notifier);
     final entries = <HomeSectionEntry>[];
 
-    for (final progress in startedShows) {
-      final libraryItem = itemById[progress.id];
+    for (final progress in startedProgress) {
+      final libraryItem = activeItemById[progress.id];
       if (libraryItem == null) {
         continue;
       }
 
-      // For now, use a placeholder label; the exact next episode
-      // can be resolved in a more advanced version via a provider.
-      entries.add(
-        HomeSectionEntry(
-          movie: _movieFromLibraryItem(libraryItem),
-          heroTag: 'home-resume-${progress.id}',
-          primaryText: 'Next Episode',
-          isWatched: false,
-        ),
-      );
+      try {
+        final snapshot = await notifier.getSnapshot(progress.id);
+        final next = snapshot?.nextUnwatchedPastEpisode;
+
+        if (next == null) {
+          continue;
+        }
+
+        entries.add(
+          HomeSectionEntry(
+            movie: _movieFromLibraryItem(libraryItem),
+            heroTag:
+                'home-resume-${progress.id}-'
+                '${next.seasonNumber}-${next.episodeNumber}',
+            primaryText: _episodeLabel(
+              season: next.seasonNumber,
+              episode: next.episodeNumber,
+            ),
+          ),
+        );
+      } catch (_) {
+        // A failed catalog request should not make Home unusable.
+        continue;
+      }
     }
 
     return entries;
@@ -310,11 +325,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     final today = _todayOnly();
 
     final items = library.where((item) {
-      if (item.mediaType != 'movie') {
-        return false;
-      }
-
-      if (item.status != MediaStatus.planning) {
+      if (item.mediaType != 'movie' ||
+          item.status != MediaStatus.planning) {
         return false;
       }
 
@@ -344,7 +356,6 @@ class _HomePageState extends ConsumerState<HomePage> {
         primaryText: item.title,
         secondaryText: _relativeFromToday(releaseDate),
         tertiaryText: _formatDate(releaseDate),
-        isWatched: false,
       );
     }).toList();
   }
@@ -439,7 +450,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
             const SizedBox(height: 12),
             SizedBox(
-              height: title == 'Resume' ? 214 : 270,
+              height: _cardHeight,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: previewItems.length,
@@ -457,7 +468,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                     tertiaryText: entry.tertiaryText,
                     isWatched: entry.isWatched,
                     sourceTab: 'home',
-                    cardWidth: 150,
+                    cardWidth: _cardWidth,
                   );
                 },
               ),
@@ -537,37 +548,19 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   static DateTime _todayOnly() {
     final now = DateTime.now();
-
-    return DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
+    return DateTime(now.year, now.month, now.day);
   }
 
   static bool _isToday(DateTime date) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = _todayOnly();
     final dateOnly = DateTime(date.year, date.month, date.day);
     return dateOnly == today;
   }
 
-  static String _relativeFromToday(
-    DateTime date,
-  ) {
+  static String _relativeFromToday(DateTime date) {
     final today = _todayOnly();
-
-    final target = DateTime(
-      date.year,
-      date.month,
-      date.day,
-    );
-
+    final target = DateTime(date.year, date.month, date.day);
     final difference = target.difference(today).inDays;
-
-    if (difference == 0) {
-      return 'Today';
-    }
 
     if (difference <= 0) {
       return 'Today';

@@ -9,6 +9,13 @@ class TvProgress {
   final int totalSeasons;
   final DateTime? lastWatchedAt;
 
+  /// Persisted watched episode identifiers in `season:episode` form,
+  /// such as `1:1`, `1:2`, or `4:1`.
+  ///
+  /// Existing saved progress with only `watchedEpisodes` remains readable.
+  /// The provider migrates legacy counts to keys when it has TMDB episode data.
+  final Set<String> watchedEpisodeKeys;
+
   TvProgress({
     required this.id,
     required this.title,
@@ -19,26 +26,47 @@ class TvProgress {
     required this.totalEpisodes,
     required this.totalSeasons,
     this.lastWatchedAt,
-  });
+    Set<String>? watchedEpisodeKeys,
+  }) : watchedEpisodeKeys = Set.unmodifiable(
+          watchedEpisodeKeys ?? const <String>{},
+        );
 
   bool get isFinished {
     if (totalEpisodes <= 0) return false;
+
+    if (watchedEpisodeKeys.isNotEmpty) {
+      return watchedEpisodeKeys.length >= totalEpisodes;
+    }
+
     return watchedEpisodes >= totalEpisodes;
   }
 
   bool get hasStarted {
-    return currentSeason > 1 || currentEpisode > 1 || watchedEpisodes > 0;
+    return watchedEpisodeKeys.isNotEmpty ||
+        currentSeason > 1 ||
+        currentEpisode > 1 ||
+        watchedEpisodes > 0;
+  }
+
+  bool get usesEpisodeKeys {
+    return watchedEpisodeKeys.isNotEmpty;
   }
 
   String get nextEpisodeLabel {
     if (isFinished) return 'Completed';
+
     return 'S${currentSeason.toString().padLeft(2, '0')} '
         'E${currentEpisode.toString().padLeft(2, '0')}';
   }
 
   double get progress {
     if (totalEpisodes <= 0) return 0.0;
-    return watchedEpisodes / totalEpisodes;
+
+    final completed = watchedEpisodeKeys.isNotEmpty
+        ? watchedEpisodeKeys.length
+        : watchedEpisodes;
+
+    return (completed / totalEpisodes).clamp(0.0, 1.0);
   }
 
   TvProgress copyWith({
@@ -52,6 +80,8 @@ class TvProgress {
     int? totalSeasons,
     DateTime? lastWatchedAt,
     bool clearLastWatchedAt = false,
+    Set<String>? watchedEpisodeKeys,
+    bool clearWatchedEpisodeKeys = false,
   }) {
     return TvProgress(
       id: id ?? this.id,
@@ -65,10 +95,22 @@ class TvProgress {
       lastWatchedAt: clearLastWatchedAt
           ? null
           : (lastWatchedAt ?? this.lastWatchedAt),
+      watchedEpisodeKeys: clearWatchedEpisodeKeys
+          ? const <String>{}
+          : (watchedEpisodeKeys ?? this.watchedEpisodeKeys),
     );
   }
 
   factory TvProgress.fromJson(Map<String, dynamic> json) {
+    final rawKeys = json['watchedEpisodeKeys'];
+
+    final watchedKeys = rawKeys is List
+        ? rawKeys
+            .map((value) => value.toString().trim())
+            .where((value) => _isEpisodeKey(value))
+            .toSet()
+        : <String>{};
+
     return TvProgress(
       id: json['id'] is int ? json['id'] as int : 0,
       title: json['title']?.toString() ?? 'Unknown Title',
@@ -91,6 +133,7 @@ class TvProgress {
       lastWatchedAt: json['lastWatchedAt'] != null
           ? DateTime.tryParse(json['lastWatchedAt'].toString())
           : null,
+      watchedEpisodeKeys: watchedKeys,
     );
   }
 
@@ -104,8 +147,25 @@ class TvProgress {
       'watchedEpisodes': watchedEpisodes,
       'totalEpisodes': totalEpisodes,
       'totalSeasons': totalSeasons,
+      'watchedEpisodeKeys': watchedEpisodeKeys.toList()..sort(),
       if (lastWatchedAt != null)
         'lastWatchedAt': lastWatchedAt!.toIso8601String(),
     };
+  }
+
+  static bool _isEpisodeKey(String value) {
+    final parts = value.split(':');
+
+    if (parts.length != 2) {
+      return false;
+    }
+
+    final season = int.tryParse(parts[0]);
+    final episode = int.tryParse(parts[1]);
+
+    return season != null &&
+        episode != null &&
+        season > 0 &&
+        episode > 0;
   }
 }

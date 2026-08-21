@@ -1,10 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/media_library_item.dart';
 import '../models/media_status.dart';
 import '../models/movie.dart';
-import '../models/tv_progress.dart';
-import '../services/metadata_refresh_service.dart';
 import 'library_provider.dart';
 import 'tv_progress_provider.dart';
 
@@ -28,98 +25,89 @@ class NextAiringItem {
 
 final nextAiringProvider =
     FutureProvider<List<NextAiringItem>>((ref) async {
-  final cache = MetadataRefreshService.instance;
-  const cacheKey = 'next_airing';
+  final library = ref.watch(libraryProvider);
+  final progressNotifier = ref.watch(tvProgressProvider.notifier);
 
-  final cached = cache.read<List<NextAiringItem>>(cacheKey);
+  final trackedShows = library.where((item) {
+    return item.mediaType == 'tv' &&
+        item.status != MediaStatus.dropped;
+  }).toList();
 
-  if (cached != null && cache.isFresh(cacheKey)) {
-    return cached;
-  }
+  final items = <NextAiringItem>[];
 
-  try {
-    final library = ref.watch(libraryProvider);
-    final progressItems = ref.watch(tvProgressProvider);
-    final progressNotifier = ref.watch(tvProgressProvider.notifier);
-
-    final progressById = <int, TvProgress>{
-      for (final progress in progressItems) progress.id: progress,
-    };
-
-    final trackedShows = library.where((item) {
-      return item.mediaType == 'tv' &&
-          item.status != MediaStatus.dropped;
-    }).toList();
-
-    final items = <NextAiringItem>[];
-
-    for (final item in trackedShows) {
-      final progress = progressById[item.id];
-      if (progress == null) {
-        continue;
-      }
-
-      final snapshot = await progressNotifier.getSnapshot(item.id);
-      if (snapshot == null) {
-        continue;
-      }
-
-      final airingEpisodes = snapshot.airingEpisodes;
-      if (airingEpisodes.isEmpty) {
-        continue;
-      }
-
-      // Use the first airing episode
-      final episode = airingEpisodes.first;
-      if (episode.airDate == null) {
-        continue;
-      }
-
-      final isWatched = snapshot.isEpisodeWatched(
-        episode.seasonNumber,
-        episode.episodeNumber,
-      );
-
-      final show = Movie(
+  for (final item in trackedShows) {
+    try {
+      // Airing must work even before the user has created TV progress
+      // by opening Episodes or marking an episode.
+      final snapshot = await progressNotifier.getSnapshotForShow(
         id: item.id,
         title: item.title,
-        overview: '',
         posterPath: item.posterPath,
-        backdropPath: item.backdropPath,
-        voteAverage: 0,
-        releaseDate: item.releaseDate?.toIso8601String() ?? '',
-        popularity: 0,
-        originalLanguage: '',
-        mediaType: 'tv',
       );
+
+      if (snapshot.airingEpisodes.isEmpty) {
+        continue;
+      }
+
+      // One upcoming/today episode per show on Home. The catalog is sorted,
+      // so today appears first, otherwise the nearest future episode.
+      final episode = snapshot.airingEpisodes.first;
+      final airDate = episode.airDate;
+
+      if (airDate == null) {
+        continue;
+      }
 
       items.add(
         NextAiringItem(
-          show: show,
-          airDate: episode.airDate!,
+          show: Movie(
+            id: item.id,
+            title: item.title,
+            overview: '',
+            posterPath: item.posterPath,
+            backdropPath: item.backdropPath,
+            voteAverage: 0,
+            releaseDate: item.releaseDate?.toIso8601String() ?? '',
+            popularity: 0,
+            originalLanguage: '',
+            mediaType: 'tv',
+          ),
+          airDate: airDate,
           seasonNumber: episode.seasonNumber,
           episodeNumber: episode.episodeNumber,
           episodeName: '',
-          isWatched: isWatched,
+          isWatched: snapshot.isEpisodeWatched(
+  '${episode.tvId}:s${episode.seasonNumber}e${episode.episodeNumber}',
+),
         ),
       );
+    } catch (_) {
+      // A single failing TMDB show request must not make Home fail.
+      continue;
     }
-
-    items.sort(
-      (a, b) => a.airDate.compareTo(b.airDate),
-    );
-
-    cache.write<List<NextAiringItem>>(
-      cacheKey,
-      items,
-    );
-
-    return items;
-  } catch (error) {
-    if (cached != null) {
-      return cached;
-    }
-
-    rethrow;
   }
+
+  items.sort((a, b) {
+    final dateCompare = a.airDate.compareTo(b.airDate);
+
+    if (dateCompare != 0) {
+      return dateCompare;
+    }
+
+    final showCompare = a.show.title.toLowerCase().compareTo(
+          b.show.title.toLowerCase(),
+        );
+
+    if (showCompare != 0) {
+      return showCompare;
+    }
+
+    if (a.seasonNumber != b.seasonNumber) {
+      return a.seasonNumber.compareTo(b.seasonNumber);
+    }
+
+    return a.episodeNumber.compareTo(b.episodeNumber);
+  });
+
+  return items;
 });

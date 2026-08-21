@@ -47,8 +47,7 @@ final tvLibrarySectionsProvider =
 
     final progress = progressById[show.id];
 
-    // Planned: no episodes watched yet
-    if (progress == null || progress.watchedEpisodes <= 0) {
+    if (progress == null || progress.watchedEpisodeKeys.isEmpty) {
       planned.add(show);
       continue;
     }
@@ -56,35 +55,23 @@ final tvLibrarySectionsProvider =
     try {
       final snapshot = await progressNotifier.getSnapshot(show.id);
 
-      if (snapshot == null) {
-        // If we can't get snapshot, treat as Watching if started
-        watching.add(show);
+      if (snapshot == null || !snapshot.hasStarted) {
+        planned.add(show);
         continue;
       }
 
-      final hasAnyWatched = snapshot.hasStarted;
-      final allReleasedWatched = snapshot.hasFinishedReleasedEpisodes;
-      final hasFuture = snapshot.hasFutureEpisodes;
+      final isCompleteWithoutFuture =
+          snapshot.hasFinishedReleasedEpisodes &&
+              !snapshot.hasFutureEpisodes;
 
-      // Watched:
-      // - All released episodes watched AND
-      // - No future episodes/seasons expected
-      if (hasAnyWatched && allReleasedWatched && !hasFuture) {
+      if (isCompleteWithoutFuture) {
         watched.add(show);
-      } else if (hasAnyWatched) {
-        // Watching: at least one episode watched, but not fully done
-        watching.add(show);
       } else {
-        // Fallback: should not happen if progress.watchedEpisodes > 0
-        planned.add(show);
+        watching.add(show);
       }
     } catch (_) {
-      // On error, if started, keep in Watching; else Planned
-      if (progress != null && progress.watchedEpisodes > 0) {
-        watching.add(show);
-      } else {
-        planned.add(show);
-      }
+      // Preserve access to an already-started show when metadata is offline.
+      watching.add(show);
     }
   }
 

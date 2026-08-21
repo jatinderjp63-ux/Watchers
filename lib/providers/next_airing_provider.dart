@@ -1,17 +1,20 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/media_library_item.dart';
+import '../models/media_status.dart';
+import '../models/movie.dart';
 import '../models/tv_progress.dart';
 import '../services/metadata_refresh_service.dart';
-import 'tmdb_service_provider.dart';
+import 'library_provider.dart';
 import 'tv_progress_provider.dart';
-import 'tvmaze_service_provider.dart';
 
 class NextAiringItem {
-  final TvProgress show;
+  final Movie show;
   final DateTime airDate;
   final int seasonNumber;
   final int episodeNumber;
   final String episodeName;
+  final bool isWatched;
 
   const NextAiringItem({
     required this.show,
@@ -19,6 +22,7 @@ class NextAiringItem {
     required this.seasonNumber,
     required this.episodeNumber,
     required this.episodeName,
+    required this.isWatched,
   });
 }
 
@@ -27,111 +31,76 @@ final nextAiringProvider =
   final cache = MetadataRefreshService.instance;
   const cacheKey = 'next_airing';
 
-  final cached =
-      cache.read<List<NextAiringItem>>(cacheKey);
+  final cached = cache.read<List<NextAiringItem>>(cacheKey);
 
-  if (cached != null &&
-      cache.isFresh(cacheKey)) {
+  if (cached != null && cache.isFresh(cacheKey)) {
     return cached;
   }
 
   try {
-    final tmdb = ref.watch(tmdbServiceProvider);
-    final tvMaze = ref.watch(tvMazeServiceProvider);
-    final trackedShows = ref.watch(tvProgressProvider);
+    final library = ref.watch(libraryProvider);
+    final progressItems = ref.watch(tvProgressProvider);
+    final progressNotifier = ref.watch(tvProgressProvider.notifier);
 
-    final now = DateTime.now();
+    final progressById = <int, TvProgress>{
+      for (final progress in progressItems) progress.id: progress,
+    };
 
-    final today = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
+    final trackedShows = library.where((item) {
+      return item.mediaType == 'tv' &&
+          item.status != MediaStatus.dropped;
+    }).toList();
 
-    final activeShows = trackedShows
-        .where(
-          (show) =>
-              show.hasStarted && !show.isFinished,
-        )
-        .toList();
+    final items = <NextAiringItem>[];
 
-    final List<NextAiringItem> items = [];
+    for (final item in trackedShows) {
+      final progress = progressById[item.id];
+      if (progress == null) {
+        continue;
+      }
 
-    for (final show in activeShows) {
-      Map<String, dynamic>? nextEpisode;
+      final snapshot = await progressNotifier.getSnapshot(item.id);
+      if (snapshot == null) {
+        continue;
+      }
 
-      final tvMazeEpisodes =
-          await tvMaze.getEpisodesForShow(
-        show.title,
+      final airingEpisodes = snapshot.airingEpisodes;
+      if (airingEpisodes.isEmpty) {
+        continue;
+      }
+
+      // Use the first airing episode
+      final episode = airingEpisodes.first;
+      if (episode.airDate == null) {
+        continue;
+      }
+
+      final isWatched = snapshot.isEpisodeWatched(
+        episode.seasonNumber,
+        episode.episodeNumber,
       );
 
-      if (tvMazeEpisodes.isNotEmpty) {
-        nextEpisode = _findUpcomingEpisode(
-          tvMazeEpisodes,
-          today,
-          minimumSeason: show.currentSeason,
-        );
-      }
-
-      if (nextEpisode == null) {
-        final currentSeasonEpisodes =
-            await tmdb.getSeasonEpisodes(
-          show.id,
-          show.currentSeason,
-        );
-
-        nextEpisode = _findUpcomingEpisode(
-          currentSeasonEpisodes,
-          today,
-          minimumSeason: show.currentSeason,
-        );
-      }
-
-      if (nextEpisode == null) {
-        final nextSeasonEpisodes =
-            await tmdb.getSeasonEpisodes(
-          show.id,
-          show.currentSeason + 1,
-        );
-
-        nextEpisode = _findUpcomingEpisode(
-          nextSeasonEpisodes,
-          today,
-          minimumSeason: show.currentSeason + 1,
-        );
-      }
-
-      if (nextEpisode == null) {
-        continue;
-      }
-
-      final airDateValue =
-          nextEpisode['air_date'];
-
-      final airDate = airDateValue is String
-          ? DateTime.tryParse(airDateValue)
-          : null;
-
-      if (airDate == null) {
-        continue;
-      }
+      final show = Movie(
+        id: item.id,
+        title: item.title,
+        overview: '',
+        posterPath: item.posterPath,
+        backdropPath: item.backdropPath,
+        voteAverage: 0,
+        releaseDate: item.releaseDate?.toIso8601String() ?? '',
+        popularity: 0,
+        originalLanguage: '',
+        mediaType: 'tv',
+      );
 
       items.add(
         NextAiringItem(
           show: show,
-          airDate: airDate,
-          seasonNumber: _readInt(
-            nextEpisode['season_number'],
-            fallback: show.currentSeason,
-          ),
-          episodeNumber: _readInt(
-            nextEpisode['episode_number'],
-            fallback: show.currentEpisode,
-          ),
-          episodeName:
-              nextEpisode['name'] is String
-                  ? nextEpisode['name'] as String
-                  : '',
+          airDate: episode.airDate!,
+          seasonNumber: episode.seasonNumber,
+          episodeNumber: episode.episodeNumber,
+          episodeName: '',
+          isWatched: isWatched,
         ),
       );
     }
@@ -154,97 +123,3 @@ final nextAiringProvider =
     rethrow;
   }
 });
-
-Map<String, dynamic>? _findUpcomingEpisode(
-  List<Map<String, dynamic>> episodes,
-  DateTime today, {
-  required int minimumSeason,
-}) {
-  final sortedEpisodes = [...episodes]
-    ..sort(
-      (a, b) {
-        final aSeason = _readInt(
-          a['season_number'],
-          fallback: 0,
-        );
-
-        final bSeason = _readInt(
-          b['season_number'],
-          fallback: 0,
-        );
-
-        if (aSeason != bSeason) {
-          return aSeason.compareTo(bSeason);
-        }
-
-        final aEpisode = _readInt(
-          a['episode_number'],
-          fallback: 0,
-        );
-
-        final bEpisode = _readInt(
-          b['episode_number'],
-          fallback: 0,
-        );
-
-        return aEpisode.compareTo(bEpisode);
-      },
-    );
-
-  for (final episode in sortedEpisodes) {
-    final seasonNumber = _readInt(
-      episode['season_number'],
-      fallback: 0,
-    );
-
-    if (seasonNumber < minimumSeason) {
-      continue;
-    }
-
-    final airDateValue =
-        episode['air_date'];
-
-    if (airDateValue == null ||
-        airDateValue.toString().isEmpty) {
-      continue;
-    }
-
-    final airDate = DateTime.tryParse(
-      airDateValue.toString(),
-    );
-
-    if (airDate == null) {
-      continue;
-    }
-
-    final dateOnly = DateTime(
-      airDate.year,
-      airDate.month,
-      airDate.day,
-    );
-
-    if (!dateOnly.isBefore(today)) {
-      return episode;
-    }
-  }
-
-  return null;
-}
-
-int _readInt(
-  dynamic value, {
-  required int fallback,
-}) {
-  if (value is int) {
-    return value;
-  }
-
-  if (value is num) {
-    return value.toInt();
-  }
-
-  return int.tryParse(
-        value?.toString() ?? '',
-      ) ??
-      fallback;
-}

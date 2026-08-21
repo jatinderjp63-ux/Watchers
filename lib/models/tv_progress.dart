@@ -7,6 +7,7 @@ class TvProgress {
   final int watchedEpisodes;
   final int totalEpisodes;
   final int totalSeasons;
+  final DateTime? lastWatchedAt;
 
   TvProgress({
     required this.id,
@@ -17,6 +18,7 @@ class TvProgress {
     required this.watchedEpisodes,
     required this.totalEpisodes,
     required this.totalSeasons,
+    this.lastWatchedAt,
   });
 
   bool get isFinished {
@@ -30,7 +32,8 @@ class TvProgress {
 
   String get nextEpisodeLabel {
     if (isFinished) return 'Completed';
-    return 'S${currentSeason.toString().padLeft(2, '0')} E${currentEpisode.toString().padLeft(2, '0')}';
+    return 'S${currentSeason.toString().padLeft(2, '0')} '
+        'E${currentEpisode.toString().padLeft(2, '0')}';
   }
 
   double get progress {
@@ -47,6 +50,8 @@ class TvProgress {
     int? watchedEpisodes,
     int? totalEpisodes,
     int? totalSeasons,
+    DateTime? lastWatchedAt,
+    bool clearLastWatchedAt = false,
   }) {
     return TvProgress(
       id: id ?? this.id,
@@ -57,6 +62,9 @@ class TvProgress {
       watchedEpisodes: watchedEpisodes ?? this.watchedEpisodes,
       totalEpisodes: totalEpisodes ?? this.totalEpisodes,
       totalSeasons: totalSeasons ?? this.totalSeasons,
+      lastWatchedAt: clearLastWatchedAt
+          ? null
+          : (lastWatchedAt ?? this.lastWatchedAt),
     );
   }
 
@@ -80,6 +88,9 @@ class TvProgress {
       totalSeasons: json['totalSeasons'] is int
           ? json['totalSeasons'] as int
           : 0,
+      lastWatchedAt: json['lastWatchedAt'] != null
+          ? DateTime.tryParse(json['lastWatchedAt'].toString())
+          : null,
     );
   }
 
@@ -93,6 +104,8 @@ class TvProgress {
       'watchedEpisodes': watchedEpisodes,
       'totalEpisodes': totalEpisodes,
       'totalSeasons': totalSeasons,
+      if (lastWatchedAt != null)
+        'lastWatchedAt': lastWatchedAt!.toIso8601String(),
     };
   }
 }

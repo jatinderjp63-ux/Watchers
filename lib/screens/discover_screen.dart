@@ -37,6 +37,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
   String? searchError;
 
   bool _hasLoadedOnce = false;
+  int _searchRequestCounter = 0;
 
   @override
   void initState() {
@@ -123,9 +124,13 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
       searchError = null;
     });
 
+    // Increment request counter to invalidate older in-flight searches
+    final requestId = ++_searchRequestCounter;
+
     Future.delayed(const Duration(milliseconds: 450), () async {
       if (!mounted) return;
       if (searchController.text.trim() != query) return;
+      if (requestId != _searchRequestCounter) return;
 
       try {
         final service = ref.read(tmdbServiceProvider);
@@ -139,6 +144,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
 
         if (!mounted) return;
         if (searchController.text.trim() != query) return;
+        if (requestId != _searchRequestCounter) return;
 
         setState(() {
           searchResults = results[0] as List<Movie>;
@@ -147,6 +153,7 @@ class _DiscoverScreenState extends ConsumerState<DiscoverScreen>
         });
       } catch (_) {
         if (!mounted) return;
+        if (requestId != _searchRequestCounter) return;
 
         setState(() {
           searchResults = [];

@@ -16,6 +16,7 @@ import '../screens/movie_details_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/statistics_screen.dart';
+import '../screens/tv_details_screen.dart';
 
 final GlobalKey<NavigatorState> rootNavigatorKey =
     GlobalKey<NavigatorState>();
@@ -37,7 +38,7 @@ Widget _detailsRoute(GoRouterState state) {
 
   if (extra is! Map<String, dynamic>) {
     return const RouterErrorScreen(
-      message: 'Movie details data is missing.',
+      message: 'Details data is missing.',
     );
   }
 
@@ -50,6 +51,14 @@ Widget _detailsRoute(GoRouterState state) {
   }
 
   final heroTag = extra['heroTag'];
+  final mediaType = movie.mediaType;
+
+  if (mediaType == 'tv') {
+    return TvDetailsScreen(
+      show: movie,
+      heroTag: heroTag is String ? heroTag : '',
+    );
+  }
 
   return MovieDetailsScreen(
     movie: movie,

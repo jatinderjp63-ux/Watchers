@@ -18,6 +18,171 @@ final tvProgressProvider =
   return TvProgressNotifier(progressService, tmdbService);
 });
 
+class TvEpisodePosition {
+  final int seasonNumber;
+  final int episodeNumber;
+  final DateTime? airDate;
+
+  const TvEpisodePosition({
+    required this.seasonNumber,
+    required this.episodeNumber,
+    required this.airDate,
+  });
+}
+
+class TvProgressSnapshot {
+  final TvProgress progress;
+  final List<TvEpisodePosition> releasedEpisodes;
+  final List<TvEpisodePosition> allEpisodes;
+  final List<TvEpisodePosition> todayEpisodes;
+  final List<TvEpisodePosition> futureEpisodes;
+
+  const TvProgressSnapshot({
+    required this.progress,
+    required this.releasedEpisodes,
+    required this.allEpisodes,
+    required this.todayEpisodes,
+    required this.futureEpisodes,
+  });
+
+  int get watchedReleasedEpisodes {
+    return progress.watchedEpisodes.clamp(0, releasedEpisodes.length);
+  }
+
+  bool get hasStarted {
+    return watchedReleasedEpisodes > 0;
+  }
+
+  bool get hasFinishedReleasedEpisodes {
+    return releasedEpisodes.isNotEmpty &&
+        watchedReleasedEpisodes >= releasedEpisodes.length;
+  }
+
+  bool get hasFutureEpisodes {
+    return futureEpisodes.isNotEmpty;
+  }
+
+  TvEpisodePosition? get lastWatched {
+    if (!hasStarted || releasedEpisodes.isEmpty) {
+      return null;
+    }
+
+    return releasedEpisodes[watchedReleasedEpisodes - 1];
+  }
+
+  /// Next unwatched released episode that aired BEFORE today.
+  /// Used for Resume.
+  TvEpisodePosition? get nextUnwatchedPastEpisode {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    for (var i = 0; i < releasedEpisodes.length; i++) {
+      if (i >= watchedReleasedEpisodes) {
+        final episode = releasedEpisodes[i];
+        if (episode.airDate == null) {
+          continue;
+        }
+
+        final dateOnly = DateTime(
+          episode.airDate!.year,
+          episode.airDate!.month,
+          episode.airDate!.day,
+        );
+
+        if (dateOnly.isBefore(today)) {
+          return episode;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /// Next episode for Airing:
+  /// - If there is an unwatched episode airing today, return it.
+  /// - Else if there is a future episode, return the earliest.
+  /// - Else if all released episodes are watched and there are future episodes,
+  ///   return the earliest future episode.
+  TvEpisodePosition? get nextAiringEpisode {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    // Check today's episodes first
+    for (var i = 0; i < releasedEpisodes.length; i++) {
+      final episode = releasedEpisodes[i];
+      if (episode.airDate == null) {
+        continue;
+      }
+
+      final dateOnly = DateTime(
+        episode.airDate!.year,
+        episode.airDate!.month,
+        episode.airDate!.day,
+      );
+
+      if (dateOnly == today) {
+        // Include both watched and unwatched for Airing
+        return episode;
+      }
+    }
+
+    // Then future episodes
+    if (futureEpisodes.isNotEmpty) {
+      return futureEpisodes.first;
+    }
+
+    return null;
+  }
+
+  /// All episodes for Airing section:
+  /// - Today's episodes (watched or unwatched).
+  /// - Future episodes.
+  List<TvEpisodePosition> get airingEpisodes {
+    return [...todayEpisodes, ...futureEpisodes];
+  }
+
+  int watchedInSeason(int seasonNumber) {
+    return releasedEpisodes
+        .take(watchedReleasedEpisodes)
+        .where((episode) => episode.seasonNumber == seasonNumber)
+        .length;
+  }
+
+  bool isEpisodeWatched(
+    int seasonNumber,
+    int episodeNumber,
+  ) {
+    final index = releasedEpisodes.indexWhere(
+      (episode) =>
+          episode.seasonNumber == seasonNumber &&
+          episode.episodeNumber == episodeNumber,
+    );
+
+    if (index == -1) {
+      return false;
+    }
+
+    return index < watchedReleasedEpisodes;
+  }
+
+  bool isSeasonWatched(int seasonNumber) {
+    final seasonEpisodes = releasedEpisodes
+        .where((episode) => episode.seasonNumber == seasonNumber)
+        .toList();
+
+    if (seasonEpisodes.isEmpty) {
+      return false;
+    }
+
+    return seasonEpisodes.every(
+      (episode) => isEpisodeWatched(
+        episode.seasonNumber,
+        episode.episodeNumber,
+      ),
+    );
+  }
+}
+
 class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   TvProgressNotifier(this._service, this._tmdbService) : super([]) {
     load();
@@ -26,8 +191,8 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   final TvProgressService _service;
   final TmdbService _tmdbService;
 
-  final Map<String, int> _seasonEpisodeCounts = {};
-  final Map<String, Future<int>> _seasonCountRequests = {};
+  final Map<int, Future<List<TvEpisodePosition>>> _catalogRequests = {};
+  final Map<int, List<TvEpisodePosition>> _catalogCache = {};
 
   Future<void> load() async {
     state = await _service.load();
@@ -48,47 +213,257 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     await _saveInBackground();
   }
 
-  Future<void> markEpisodeWatched(int id) async {
+  TvProgress? getShowById(int id) {
+    try {
+      return state.firstWhere((show) => show.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<TvProgress> ensureShow({
+    required int id,
+    required String title,
+    required String posterPath,
+    required int totalEpisodes,
+    required int totalSeasons,
+  }) async {
     final existing = getShowById(id);
-    if (existing == null || existing.isFinished) {
-      return;
+    if (existing != null) {
+      return existing;
     }
 
-    final currentSeason = existing.currentSeason;
-    final currentEpisode = existing.currentEpisode;
-
-    final currentSeasonCount = await _episodeCountForSeason(
-      existing.id,
-      currentSeason,
+    final created = TvProgress(
+      id: id,
+      title: title,
+      posterPath: posterPath,
+      currentSeason: 1,
+      currentEpisode: 1,
+      watchedEpisodes: 0,
+      totalEpisodes: totalEpisodes < 0 ? 0 : totalEpisodes,
+      totalSeasons: totalSeasons < 0 ? 0 : totalSeasons,
     );
 
-    if (currentSeasonCount <= 0) {
-      await markEpisodeWatchedAt(
-        id,
-        currentSeason,
-        currentEpisode + 1,
+    _replaceShow(created);
+    await _saveInBackground();
+    return created;
+  }
+
+  Future<TvProgressSnapshot?> getSnapshot(int id) async {
+    final progress = getShowById(id);
+    if (progress == null) {
+      return null;
+    }
+
+    final allEpisodes = await _getEpisodeCatalog(id);
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final releasedEpisodes = <TvEpisodePosition>[];
+    final todayEpisodes = <TvEpisodePosition>[];
+    final futureEpisodes = <TvEpisodePosition>[];
+
+    for (final episode in allEpisodes) {
+      if (episode.airDate == null) {
+        // Treat as unreleased; do not include in released/today/future
+        continue;
+      }
+
+      final dateOnly = DateTime(
+        episode.airDate!.year,
+        episode.airDate!.month,
+        episode.airDate!.day,
       );
+
+      if (dateOnly.isBefore(today)) {
+        releasedEpisodes.add(episode);
+      } else if (dateOnly == today) {
+        releasedEpisodes.add(episode);
+        todayEpisodes.add(episode);
+      } else {
+        futureEpisodes.add(episode);
+      }
+    }
+
+    // Sort all lists by season/episode
+    _sortEpisodes(releasedEpisodes);
+    _sortEpisodes(todayEpisodes);
+    _sortEpisodes(futureEpisodes);
+
+    return TvProgressSnapshot(
+      progress: progress,
+      releasedEpisodes: releasedEpisodes,
+      allEpisodes: allEpisodes,
+      todayEpisodes: todayEpisodes,
+      futureEpisodes: futureEpisodes,
+    );
+  }
+
+  void _sortEpisodes(List<TvEpisodePosition> episodes) {
+    episodes.sort((a, b) {
+      if (a.seasonNumber != b.seasonNumber) {
+        return a.seasonNumber.compareTo(b.seasonNumber);
+      }
+      return a.episodeNumber.compareTo(b.episodeNumber);
+    });
+  }
+
+  Future<void> toggleEpisodeWatchedAt(
+    int id,
+    int seasonNumber,
+    int episodeNumber,
+  ) async {
+    final snapshot = await getSnapshot(id);
+    if (snapshot == null) {
       return;
     }
 
-    if (currentEpisode < currentSeasonCount) {
-      await markEpisodeWatchedAt(
-        id,
-        currentSeason,
-        currentEpisode + 1,
-      );
-      return;
-    }
-
-    final nextSeason = currentSeason + 1;
-    final nextSeasonCount = await _episodeCountForSeason(
-      existing.id,
-      nextSeason,
+    final targetIndex = snapshot.releasedEpisodes.indexWhere(
+      (episode) =>
+          episode.seasonNumber == seasonNumber &&
+          episode.episodeNumber == episodeNumber,
     );
 
-    if (nextSeasonCount > 0) {
-      await markEpisodeWatchedAt(id, nextSeason, 1);
+    if (targetIndex == -1) {
+      return;
     }
+
+    final targetWatchedCount = targetIndex + 1;
+    final isAlreadyWatched =
+        snapshot.watchedReleasedEpisodes >= targetWatchedCount;
+
+    final nextWatchedCount = isAlreadyWatched
+        ? targetIndex
+        : targetWatchedCount;
+
+    await _setWatchedReleasedCount(
+      snapshot,
+      nextWatchedCount,
+    );
+  }
+
+  Future<void> toggleSeasonWatched(
+    int id,
+    int seasonNumber,
+  ) async {
+    final snapshot = await getSnapshot(id);
+    if (snapshot == null) {
+      return;
+    }
+
+    final seasonEpisodes = snapshot.releasedEpisodes
+        .where((episode) => episode.seasonNumber == seasonNumber)
+        .toList();
+
+    if (seasonEpisodes.isEmpty) {
+      return;
+    }
+
+    final lastEpisode = seasonEpisodes.last;
+    final lastIndex = snapshot.releasedEpisodes.indexWhere(
+      (episode) =>
+          episode.seasonNumber == lastEpisode.seasonNumber &&
+          episode.episodeNumber == lastEpisode.episodeNumber,
+    );
+
+    if (lastIndex == -1) {
+      return;
+    }
+
+    final watchedThroughSeason = lastIndex + 1;
+    final seasonAlreadyWatched =
+        snapshot.watchedReleasedEpisodes >= watchedThroughSeason;
+
+    final nextWatchedCount = seasonAlreadyWatched
+        ? _watchedCountBeforeSeason(snapshot, seasonNumber)
+        : watchedThroughSeason;
+
+    await _setWatchedReleasedCount(
+      snapshot,
+      nextWatchedCount,
+    );
+  }
+
+  Future<void> markEpisodeWatchedAt(
+    int id,
+    int seasonNumber,
+    int episodeNumber,
+  ) async {
+    final snapshot = await getSnapshot(id);
+    if (snapshot == null) {
+      return;
+    }
+
+    final targetIndex = snapshot.releasedEpisodes.indexWhere(
+      (episode) =>
+          episode.seasonNumber == seasonNumber &&
+          episode.episodeNumber == episodeNumber,
+    );
+
+    if (targetIndex == -1) {
+      return;
+    }
+
+    await _setWatchedReleasedCount(
+      snapshot,
+      targetIndex + 1,
+    );
+  }
+
+  Future<void> markSeasonWatched(
+    int id,
+    int seasonNumber,
+  ) async {
+    final snapshot = await getSnapshot(id);
+    if (snapshot == null) {
+      return;
+    }
+
+    final seasonEpisodes = snapshot.releasedEpisodes
+        .where((episode) => episode.seasonNumber == seasonNumber)
+        .toList();
+
+    if (seasonEpisodes.isEmpty) {
+      return;
+    }
+
+    final lastEpisode = seasonEpisodes.last;
+    final lastIndex = snapshot.releasedEpisodes.indexWhere(
+      (episode) =>
+          episode.seasonNumber == lastEpisode.seasonNumber &&
+          episode.episodeNumber == lastEpisode.episodeNumber,
+    );
+
+    if (lastIndex == -1) {
+      return;
+    }
+
+    await _setWatchedReleasedCount(
+      snapshot,
+      lastIndex + 1,
+    );
+  }
+
+  Future<void> markAllReleasedEpisodesWatched(int id) async {
+    final snapshot = await getSnapshot(id);
+    if (snapshot == null || snapshot.releasedEpisodes.isEmpty) {
+      return;
+    }
+
+    await _setWatchedReleasedCount(
+      snapshot,
+      snapshot.releasedEpisodes.length,
+    );
+  }
+
+  Future<void> clearEpisodeProgress(int id) async {
+    final snapshot = await getSnapshot(id);
+    if (snapshot == null) {
+      return;
+    }
+
+    await _setWatchedReleasedCount(snapshot, 0);
   }
 
   Future<void> setProgress({
@@ -103,249 +478,241 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
       return;
     }
 
-    _replaceShow(
-      _normalizeShow(
-        existing.copyWith(
-          currentSeason: season,
-          currentEpisode: episode,
-          watchedEpisodes: watchedEpisodes ?? existing.watchedEpisodes,
-          totalEpisodes: totalEpisodes ?? existing.totalEpisodes,
-        ),
-      ),
-    );
-
-    await _saveInBackground();
-  }
-
-  Future<void> toggleSeasonWatched(
-    int id,
-    int seasonNumber,
-  ) async {
-    final existing = getShowById(id);
-    if (existing == null) {
-      return;
+    if (watchedEpisodes != null) {
+      final snapshot = await getSnapshot(id);
+      if (snapshot != null) {
+        await _setWatchedReleasedCount(
+          snapshot,
+          watchedEpisodes,
+          totalEpisodesOverride: totalEpisodes,
+        );
+        return;
+      }
     }
-
-    final safeSeason = seasonNumber < 1 ? 1 : seasonNumber;
-    final watchedThroughSeason = await _episodesUpToSeason(
-      existing.id,
-      safeSeason,
-    );
-
-    final isWatched = existing.watchedEpisodes >= watchedThroughSeason;
-
-    if (isWatched) {
-      // Unwatch this season: set progress to the state just before this season
-      await _setProgressBeforeSeason(existing, safeSeason);
-    } else {
-      // Watch this season
-      await _setProgressThroughSeason(existing, safeSeason);
-    }
-  }
-
-  Future<void> toggleEpisodeWatchedAt(
-    int id,
-    int seasonNumber,
-    int episodeNumber,
-  ) async {
-    final existing = getShowById(id);
-    if (existing == null) {
-      return;
-    }
-
-    final safeSeason = seasonNumber < 1 ? 1 : seasonNumber;
-    final safeEpisode = episodeNumber < 1 ? 1 : episodeNumber;
-
-    final watchedThroughEpisode = await _episodesUpToEpisode(
-      existing.id,
-      safeSeason,
-      safeEpisode,
-    );
-
-    final isWatched = existing.watchedEpisodes >= watchedThroughEpisode;
-
-    if (isWatched) {
-      await _setProgressBeforeEpisode(
-        existing,
-        safeSeason,
-        safeEpisode,
-      );
-    } else {
-      await _setProgressThroughEpisode(
-        existing,
-        safeSeason,
-        safeEpisode,
-      );
-    }
-  }
-
-  Future<void> markSeasonWatched(
-    int id,
-    int seasonNumber,
-  ) async {
-    final existing = getShowById(id);
-    if (existing == null) {
-      return;
-    }
-
-    await _setProgressThroughSeason(
-      existing,
-      seasonNumber < 1 ? 1 : seasonNumber,
-    );
-  }
-
-  Future<void> markEpisodeWatchedAt(
-    int id,
-    int seasonNumber,
-    int episodeNumber,
-  ) async {
-    final existing = getShowById(id);
-    if (existing == null) {
-      return;
-    }
-
-    await _setProgressThroughEpisode(
-      existing,
-      seasonNumber < 1 ? 1 : seasonNumber,
-      episodeNumber < 1 ? 1 : episodeNumber,
-    );
-  }
-
-  Future<void> _setProgressThroughSeason(
-    TvProgress existing,
-    int seasonNumber,
-  ) async {
-    final targetEpisodeCount = await _episodeCountForSeason(
-      existing.id,
-      seasonNumber,
-    );
-
-    final watchedThroughSeason = await _episodesUpToSeason(
-      existing.id,
-      seasonNumber,
-    );
 
     final updated = existing.copyWith(
-      currentSeason: seasonNumber,
-      currentEpisode: targetEpisodeCount > 0 ? targetEpisodeCount : 1,
-      watchedEpisodes: _clampWatchedEpisodes(
-        watchedThroughSeason,
-        existing.totalEpisodes,
-      ),
+      currentSeason: season < 1 ? 1 : season,
+      currentEpisode: episode < 1 ? 1 : episode,
+      totalEpisodes: totalEpisodes ?? existing.totalEpisodes,
+      lastWatchedAt: DateTime.now(),
     );
 
     _replaceShow(_normalizeShow(updated));
     await _saveInBackground();
   }
 
-  Future<void> _setProgressBeforeSeason(
-    TvProgress existing,
-    int seasonNumber,
-  ) async {
-    // If unwatching season 1, reset to the very beginning
-    if (seasonNumber <= 1) {
-      _replaceShow(
-        _normalizeShow(
-          existing.copyWith(
-            currentSeason: 1,
-            currentEpisode: 1,
-            watchedEpisodes: 0,
-          ),
-        ),
-      );
-
-      await _saveInBackground();
+  Future<void> markEpisodeWatched(int id) async {
+    final snapshot = await getSnapshot(id);
+    if (snapshot == null) {
       return;
     }
 
-    // For seasons > 1, set progress to the end of the previous season
-    final previousSeason = seasonNumber - 1;
-    final previousEpisodeCount = await _episodeCountForSeason(
-      existing.id,
-      previousSeason,
+    final next = snapshot.nextUnwatchedPastEpisode;
+    if (next == null) {
+      return;
+    }
+
+    await markEpisodeWatchedAt(
+      id,
+      next.seasonNumber,
+      next.episodeNumber,
+    );
+  }
+
+  Future<void> _setWatchedReleasedCount(
+    TvProgressSnapshot snapshot,
+    int requestedWatchedCount, {
+    int? totalEpisodesOverride,
+  }) async {
+    final safeCount = requestedWatchedCount.clamp(
+      0,
+      snapshot.releasedEpisodes.length,
     );
 
-    final watchedThroughPreviousSeason = await _episodesUpToSeason(
-      existing.id,
-      previousSeason,
+    final existing = snapshot.progress;
+    final lastWatched = safeCount == 0
+        ? null
+        : snapshot.releasedEpisodes[safeCount - 1];
+
+    final totalKnownEpisodes = snapshot.allEpisodes.length > 0
+        ? snapshot.allEpisodes.length
+        : (totalEpisodesOverride ?? existing.totalEpisodes);
+
+    final totalSeasons = _totalSeasonCount(
+      snapshot.allEpisodes,
+      fallback: existing.totalSeasons,
     );
 
     final updated = existing.copyWith(
-      currentSeason: previousSeason,
-      currentEpisode: previousEpisodeCount > 0 ? previousEpisodeCount : 1,
-      watchedEpisodes: _clampWatchedEpisodes(
-        watchedThroughPreviousSeason,
-        existing.totalEpisodes,
-      ),
+      currentSeason: lastWatched?.seasonNumber ?? 1,
+      currentEpisode: lastWatched?.episodeNumber ?? 1,
+      watchedEpisodes: safeCount,
+      totalEpisodes: totalKnownEpisodes,
+      totalSeasons: totalSeasons,
+      lastWatchedAt: safeCount == 0 ? null : DateTime.now(),
+      clearLastWatchedAt: safeCount == 0,
     );
 
     _replaceShow(_normalizeShow(updated));
     await _saveInBackground();
   }
 
-  Future<void> _setProgressThroughEpisode(
-    TvProgress existing,
+  int _watchedCountBeforeSeason(
+    TvProgressSnapshot snapshot,
     int seasonNumber,
-    int episodeNumber,
-  ) async {
-    final targetEpisodeCount = await _episodeCountForSeason(
-      existing.id,
-      seasonNumber,
-    );
-
-    final safeEpisode = targetEpisodeCount <= 0
-        ? 1
-        : episodeNumber.clamp(1, targetEpisodeCount);
-
-    final watchedThroughEpisode = await _episodesUpToEpisode(
-      existing.id,
-      seasonNumber,
-      safeEpisode,
-    );
-
-    final updated = existing.copyWith(
-      currentSeason: seasonNumber,
-      currentEpisode: safeEpisode,
-      watchedEpisodes: _clampWatchedEpisodes(
-        watchedThroughEpisode,
-        existing.totalEpisodes,
-      ),
-    );
-
-    _replaceShow(_normalizeShow(updated));
-    await _saveInBackground();
+  ) {
+    return snapshot.releasedEpisodes
+        .where((episode) => episode.seasonNumber < seasonNumber)
+        .length;
   }
 
-  Future<void> _setProgressBeforeEpisode(
-    TvProgress existing,
-    int seasonNumber,
-    int episodeNumber,
-  ) async {
-    if (episodeNumber <= 1) {
-      // Unwatching episode 1 of a season → go to state before this season
-      await _setProgressBeforeSeason(existing, seasonNumber);
-      return;
+  int _totalSeasonCount(
+    List<TvEpisodePosition> episodes, {
+    required int fallback,
+  }) {
+    if (episodes.isEmpty) {
+      return fallback < 0 ? 0 : fallback;
     }
 
-    final previousEpisode = episodeNumber - 1;
+    var maxSeason = 0;
+    for (final episode in episodes) {
+      if (episode.seasonNumber > maxSeason) {
+        maxSeason = episode.seasonNumber;
+      }
+    }
 
-    final watchedThroughPreviousEpisode = await _episodesUpToEpisode(
-      existing.id,
-      seasonNumber,
-      previousEpisode,
-    );
+    return maxSeason > 0 ? maxSeason : fallback;
+  }
 
-    final updated = existing.copyWith(
-      currentSeason: seasonNumber,
-      currentEpisode: previousEpisode,
-      watchedEpisodes: _clampWatchedEpisodes(
-        watchedThroughPreviousEpisode,
-        existing.totalEpisodes,
-      ),
-    );
+  Future<List<TvEpisodePosition>> _getEpisodeCatalog(
+    int tvId,
+  ) async {
+    final cached = _catalogCache[tvId];
+    if (cached != null) {
+      return cached;
+    }
 
-    _replaceShow(_normalizeShow(updated));
-    await _saveInBackground();
+    final activeRequest = _catalogRequests[tvId];
+    if (activeRequest != null) {
+      return activeRequest;
+    }
+
+    final request = _loadEpisodeCatalog(tvId);
+    _catalogRequests[tvId] = request;
+
+    try {
+      final catalog = await request;
+      _catalogCache[tvId] = catalog;
+      return catalog;
+    } finally {
+      _catalogRequests.remove(tvId);
+    }
+  }
+
+  Future<List<TvEpisodePosition>> _loadEpisodeCatalog(
+    int tvId,
+  ) async {
+    // Authoritative season count from raw TMDB metadata
+    int totalSeasons = await _discoverSeasonCount(tvId);
+
+    if (totalSeasons <= 0) {
+      return const [];
+    }
+
+    final allEpisodes = <TvEpisodePosition>[];
+
+    for (var season = 1; season <= totalSeasons; season++) {
+      try {
+        final episodes = await _tmdbService.getSeasonEpisodes(
+          tvId,
+          season,
+        );
+
+        for (final episode in episodes) {
+          final seasonNumber = _readInt(
+            episode['season_number'],
+            fallback: season,
+          );
+          final episodeNumber = _readInt(
+            episode['episode_number'],
+            fallback: 0,
+          );
+
+          if (seasonNumber <= 0 || episodeNumber <= 0) {
+            continue;
+          }
+
+          allEpisodes.add(
+            TvEpisodePosition(
+              seasonNumber: seasonNumber,
+              episodeNumber: episodeNumber,
+              airDate: _readDate(episode['air_date']),
+            ),
+          );
+        }
+      } catch (error) {
+        debugPrint(
+          'TV progress catalog error for S$season: $error',
+        );
+      }
+    }
+
+    _sortEpisodes(allEpisodes);
+    return allEpisodes;
+  }
+
+  Future<int> _discoverSeasonCount(int tvId) async {
+    try {
+      final raw = await _tmdbService.getRawTvMetadata(tvId);
+      final number_of_seasons = raw['number_of_seasons'];
+      if (number_of_seasons is int && number_of_seasons > 0) {
+        return number_of_seasons;
+      }
+    } catch (_) {
+      // Fall through to heuristic below
+    }
+
+    // Heuristic fallback: probe seasons until one returns empty
+    for (var season = 1; season <= 40; season++) {
+      try {
+        final episodes = await _tmdbService.getSeasonEpisodes(
+          tvId,
+          season,
+        );
+
+        if (episodes.isEmpty) {
+          return season - 1;
+        }
+      } catch (_) {
+        return season - 1;
+      }
+    }
+
+    return 40;
+  }
+
+  DateTime? _readDate(dynamic value) {
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) {
+      return null;
+    }
+
+    return DateTime.tryParse(raw);
+  }
+
+  int _readInt(
+    dynamic value, {
+    required int fallback,
+  }) {
+    if (value is int) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toInt();
+    }
+
+    return int.tryParse(value?.toString() ?? '') ?? fallback;
   }
 
   void _replaceShow(TvProgress show) {
@@ -361,95 +728,14 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     state = updated;
   }
 
-  Future<void> _saveInBackground() async {
-    try {
-      await _service.save(state);
-    } catch (error) {
-      debugPrint('TV progress save error: $error');
-    }
-  }
-
-  String _seasonCacheKey(int showId, int seasonNumber) {
-    return '$showId:$seasonNumber';
-  }
-
-  Future<int> _episodeCountForSeason(
-    int showId,
-    int seasonNumber,
-  ) async {
-    final safeSeason = seasonNumber < 1 ? 1 : seasonNumber;
-    final key = _seasonCacheKey(showId, safeSeason);
-
-    final cachedCount = _seasonEpisodeCounts[key];
-    if (cachedCount != null) {
-      return cachedCount;
-    }
-
-    final activeRequest = _seasonCountRequests[key];
-    if (activeRequest != null) {
-      return activeRequest;
-    }
-
-    final request = _loadEpisodeCount(showId, safeSeason, key);
-    _seasonCountRequests[key] = request;
-
-    try {
-      return await request;
-    } finally {
-      _seasonCountRequests.remove(key);
-    }
-  }
-
-  Future<int> _loadEpisodeCount(
-    int showId,
-    int seasonNumber,
-    String cacheKey,
-  ) async {
-    try {
-      final episodes = await _tmdbService.getSeasonEpisodes(
-        showId,
-        seasonNumber,
-      );
-
-      final count = episodes.length;
-      _seasonEpisodeCounts[cacheKey] = count;
-      return count;
-    } catch (error) {
-      debugPrint(
-        'TV progress episode count error for S$seasonNumber: $error',
-      );
-      return 0;
-    }
-  }
-
-  int _clampWatchedEpisodes(
-    int value,
-    int totalEpisodes,
-  ) {
-    if (totalEpisodes > 0) {
-      return value.clamp(0, totalEpisodes);
-    }
-
-    return value < 0 ? 0 : value;
-  }
-
-  TvProgress? getShowById(int id) {
-    try {
-      return state.firstWhere((show) => show.id == id);
-    } catch (_) {
-      return null;
-    }
-  }
-
   TvProgress _normalizeShow(TvProgress show) {
     final safeSeason = show.currentSeason < 1 ? 1 : show.currentSeason;
     final safeEpisode = show.currentEpisode < 1 ? 1 : show.currentEpisode;
     final safeTotalEpisodes = show.totalEpisodes < 0 ? 0 : show.totalEpisodes;
     final safeTotalSeasons = show.totalSeasons < 0 ? 0 : show.totalSeasons;
-
-    final safeWatchedEpisodes = safeTotalEpisodes > 0
-        ? show.watchedEpisodes.clamp(0, safeTotalEpisodes)
-        : (show.watchedEpisodes < 0 ? 0 : show.watchedEpisodes);
+    final safeWatchedEpisodes = show.watchedEpisodes < 0
+        ? 0
+        : show.watchedEpisodes;
 
     return show.copyWith(
       currentSeason: safeSeason,
@@ -460,40 +746,11 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     );
   }
 
-  Future<int> _episodesUpToSeason(
-    int tvId,
-    int seasonNumber,
-  ) async {
-    int total = 0;
-
-    for (var season = 1; season <= seasonNumber; season++) {
-      total += await _episodeCountForSeason(tvId, season);
+  Future<void> _saveInBackground() async {
+    try {
+      await _service.save(state);
+    } catch (error) {
+      debugPrint('TV progress save error: $error');
     }
-
-    return total;
-  }
-
-  Future<int> _episodesUpToEpisode(
-    int tvId,
-    int seasonNumber,
-    int episodeNumber,
-  ) async {
-    int total = 0;
-
-    for (var season = 1; season < seasonNumber; season++) {
-      total += await _episodeCountForSeason(tvId, season);
-    }
-
-    final targetSeasonCount = await _episodeCountForSeason(
-      tvId,
-      seasonNumber,
-    );
-
-    if (targetSeasonCount <= 0) {
-      return total;
-    }
-
-    final safeEpisode = episodeNumber.clamp(1, targetSeasonCount);
-    return total + safeEpisode;
   }
 }

@@ -23,8 +23,7 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  final ScrollController _scrollController =
-      ScrollController();
+  final ScrollController _scrollController = ScrollController();
 
   static const int _previewCount = 6;
 
@@ -32,25 +31,18 @@ class _HomePageState extends ConsumerState<HomePage> {
   void initState() {
     super.initState();
 
-    TabNavigationService.homeTapSignal
-        .addListener(_scrollToTop);
+    TabNavigationService.homeTapSignal.addListener(_scrollToTop);
   }
 
   @override
   void dispose() {
-    TabNavigationService.homeTapSignal
-        .removeListener(_scrollToTop);
-
+    TabNavigationService.homeTapSignal.removeListener(_scrollToTop);
     _scrollController.dispose();
     super.dispose();
   }
 
   void _scrollToTop() {
-    if (!_scrollController.hasClients) {
-      return;
-    }
-
-    if (_scrollController.offset <= 0) {
+    if (!_scrollController.hasClients || _scrollController.offset <= 0) {
       return;
     }
 
@@ -67,47 +59,28 @@ class _HomePageState extends ConsumerState<HomePage> {
     final tvProgress = ref.watch(tvProgressProvider);
     final nextAiringAsync = ref.watch(nextAiringProvider);
 
-    final upcomingMovies =
-        _buildUpcomingMovies(library);
-
-    final resumeItems =
-        _buildResumeItems(tvProgress);
+    final upcomingMovies = _buildUpcomingMovies(library);
 
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: () async {
-          await ref
-              .read(libraryProvider.notifier)
-              .loadLibrary();
-
-          await ref
-              .read(tvProgressProvider.notifier)
-              .load();
-
+          await ref.read(libraryProvider.notifier).loadLibrary();
+          await ref.read(tvProgressProvider.notifier).load();
           ref.invalidate(nextAiringProvider);
         },
         child: ListView(
           controller: _scrollController,
-          physics:
-              const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(
-            16,
-            18,
-            16,
-            24,
-          ),
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
           children: [
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Text(
                 'Home',
                 style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurface,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ),
@@ -116,29 +89,36 @@ class _HomePageState extends ConsumerState<HomePage> {
               skipLoadingOnRefresh: true,
               skipLoadingOnReload: true,
               loading: () {
-                return _buildLoadingState(
+                return _buildHomeWithResume(
                   context,
+                  library: library,
+                  tvProgress: tvProgress,
                   upcomingMovies: upcomingMovies,
-                  resumeItems: resumeItems,
+                  airingItems: const [],
+                  resumeItems: const [],
+                  isAiringLoading: true,
+                  isResumeLoading: true,
                 );
               },
               error: (_, __) {
-                return _buildContent(
+                return _buildHomeWithResume(
                   context,
-                  ref,
-                  airingItems: const [],
+                  library: library,
+                  tvProgress: tvProgress,
                   upcomingMovies: upcomingMovies,
-                  resumeItems: resumeItems,
-                  showError: true,
+                  airingItems: const [],
+                  resumeItems: const [],
+                  showAiringError: true,
                 );
               },
               data: (items) {
-                return _buildContent(
+                return _buildHomeWithResume(
                   context,
-                  ref,
-                  airingItems: _buildAiringEntries(items),
+                  library: library,
+                  tvProgress: tvProgress,
                   upcomingMovies: upcomingMovies,
-                  resumeItems: resumeItems,
+                  airingItems: _buildAiringEntries(items),
+                  resumeItems: _buildResumeEntries(library, tvProgress),
                 );
               },
             ),
@@ -149,16 +129,26 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _buildLoadingState(
+  Widget _buildHomeWithResume(
     BuildContext context, {
+    required List<MediaLibraryItem> library,
+    required List<TvProgress> tvProgress,
     required List<HomeSectionEntry> upcomingMovies,
+    required List<HomeSectionEntry> airingItems,
     required List<HomeSectionEntry> resumeItems,
+    bool isAiringLoading = false,
+    bool isResumeLoading = false,
+    bool showAiringError = false,
   }) {
-    final hasLocalContent =
-        upcomingMovies.isNotEmpty ||
-            resumeItems.isNotEmpty;
+    final isAiringEmpty = airingItems.isEmpty && !showAiringError && !isAiringLoading;
+    final isResumeEmpty = resumeItems.isEmpty && !isResumeLoading;
 
-    if (!hasLocalContent) {
+    final hasAnySection =
+        airingItems.isNotEmpty ||
+        upcomingMovies.isNotEmpty ||
+        resumeItems.isNotEmpty;
+
+    if (isAiringLoading && isResumeLoading && upcomingMovies.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 24),
         child: Center(
@@ -167,52 +157,21 @@ class _HomePageState extends ConsumerState<HomePage> {
       );
     }
 
-    return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
-      children: [
-        if (upcomingMovies.isNotEmpty)
-          _buildSection(
-            context,
-            title: 'Movies',
-            items: upcomingMovies,
-          ),
-        if (resumeItems.isNotEmpty)
-          _buildSection(
-            context,
-            title: 'Resume',
-            items: resumeItems,
-          ),
-      ],
-    );
-  }
-
-  Widget _buildContent(
-    BuildContext context,
-    WidgetRef ref, {
-    required List<HomeSectionEntry> airingItems,
-    required List<HomeSectionEntry> upcomingMovies,
-    required List<HomeSectionEntry> resumeItems,
-    bool showError = false,
-  }) {
     final scheme = Theme.of(context).colorScheme;
 
-    final hasAnySection =
-        airingItems.isNotEmpty ||
-            upcomingMovies.isNotEmpty ||
-            resumeItems.isNotEmpty;
-
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (showError && airingItems.isEmpty)
+        if (showAiringError)
           _ErrorBlock(
             onRetry: () {
               ref.invalidate(nextAiringProvider);
             },
           ),
-        if (!hasAnySection && !showError)
+        if (!hasAnySection &&
+            !showAiringError &&
+            !isAiringLoading &&
+            !isResumeLoading)
           _buildEmptyState(
             context,
             icon: Icons.home_outlined,
@@ -227,13 +186,20 @@ class _HomePageState extends ConsumerState<HomePage> {
             title: 'Airing',
             items: airingItems,
           ),
-        if (airingItems.isEmpty && !showError)
+        if (isAiringEmpty)
           _buildAiringEmptyState(context, scheme: scheme),
         if (upcomingMovies.isNotEmpty)
           _buildSection(
             context,
             title: 'Movies',
             items: upcomingMovies,
+          ),
+        if (isResumeLoading && resumeItems.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Center(
+              child: CircularProgressIndicator(),
+            ),
           ),
         if (resumeItems.isNotEmpty)
           _buildSection(
@@ -245,6 +211,144 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  List<HomeSectionEntry> _buildAiringEntries(
+    List<NextAiringItem> items,
+  ) {
+    return items.map((item) {
+      final isToday = _isToday(item.airDate);
+
+      return HomeSectionEntry(
+        movie: item.show,
+        heroTag:
+            'home-airing-${item.show.id}-'
+            '${item.seasonNumber}-'
+            '${item.episodeNumber}',
+        primaryText: _episodeLabel(
+          season: item.seasonNumber,
+          episode: item.episodeNumber,
+        ),
+        secondaryText: isToday ? 'Today' : _relativeFromToday(item.airDate),
+        tertiaryText: _formatDate(item.airDate),
+        isWatched: item.isWatched,
+      );
+    }).toList();
+  }
+
+  List<HomeSectionEntry> _buildResumeEntries(
+    List<MediaLibraryItem> library,
+    List<TvProgress> progressItems,
+  ) {
+    final activeShowIds = library
+        .where(
+          (item) =>
+              item.mediaType == 'tv' &&
+              item.status != MediaStatus.dropped,
+        )
+        .map((item) => item.id)
+        .toSet();
+
+    final itemById = <int, MediaLibraryItem>{
+      for (final item in library) item.id: item,
+    };
+
+    final notifier = ref.read(tvProgressProvider.notifier);
+
+    final startedShows = progressItems
+        .where(
+          (progress) =>
+              activeShowIds.contains(progress.id) &&
+              progress.watchedEpisodes > 0,
+        )
+        .toList()
+      ..sort((a, b) {
+        final aTime = a.lastWatchedAt;
+        final bTime = b.lastWatchedAt;
+
+        if (aTime != null && bTime != null) {
+          return bTime.compareTo(aTime);
+        }
+
+        if (aTime != null) {
+          return -1;
+        }
+
+        if (bTime != null) {
+          return 1;
+        }
+
+        return a.title.toLowerCase().compareTo(
+              b.title.toLowerCase(),
+            );
+      });
+
+    final entries = <HomeSectionEntry>[];
+
+    for (final progress in startedShows) {
+      final libraryItem = itemById[progress.id];
+      if (libraryItem == null) {
+        continue;
+      }
+
+      // For now, use a placeholder label; the exact next episode
+      // can be resolved in a more advanced version via a provider.
+      entries.add(
+        HomeSectionEntry(
+          movie: _movieFromLibraryItem(libraryItem),
+          heroTag: 'home-resume-${progress.id}',
+          primaryText: 'Next Episode',
+          isWatched: false,
+        ),
+      );
+    }
+
+    return entries;
+  }
+
+  List<HomeSectionEntry> _buildUpcomingMovies(
+    List<MediaLibraryItem> library,
+  ) {
+    final today = _todayOnly();
+
+    final items = library.where((item) {
+      if (item.mediaType != 'movie') {
+        return false;
+      }
+
+      if (item.status != MediaStatus.planning) {
+        return false;
+      }
+
+      final releaseDate = item.releaseDate;
+      if (releaseDate == null) {
+        return false;
+      }
+
+      final dateOnly = DateTime(
+        releaseDate.year,
+        releaseDate.month,
+        releaseDate.day,
+      );
+
+      return !dateOnly.isBefore(today);
+    }).toList()
+      ..sort(
+        (a, b) => a.releaseDate!.compareTo(b.releaseDate!),
+      );
+
+    return items.map((item) {
+      final releaseDate = item.releaseDate!;
+
+      return HomeSectionEntry(
+        movie: _movieFromLibraryItem(item),
+        heroTag: 'home-movie-${item.id}',
+        primaryText: item.title,
+        secondaryText: _relativeFromToday(releaseDate),
+        tertiaryText: _formatDate(releaseDate),
+        isWatched: false,
+      );
+    }).toList();
+  }
+
   Widget _buildAiringEmptyState(
     BuildContext context, {
     required ColorScheme scheme,
@@ -252,8 +356,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 28),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(
@@ -282,132 +385,19 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  List<HomeSectionEntry> _buildAiringEntries(
-    List<NextAiringItem> items,
-  ) {
-    return items.map((item) {
-      return HomeSectionEntry(
-        movie: _movieFromTvProgress(item.show),
-        heroTag:
-            'home-airing-${item.show.id}-'
-            '${item.seasonNumber}-'
-            '${item.episodeNumber}',
-        primaryText: _episodeLabel(
-          season: item.seasonNumber,
-          episode: item.episodeNumber,
-        ),
-        secondaryText:
-            _relativeFromToday(item.airDate),
-        tertiaryText: _formatDate(item.airDate),
-      );
-    }).toList();
-  }
-
-  List<HomeSectionEntry> _buildUpcomingMovies(
-    List<MediaLibraryItem> library,
-  ) {
-    final today = _todayOnly();
-
-    final items = library
-        .where((item) {
-          if (item.mediaType != 'movie') {
-            return false;
-          }
-
-          if (item.status != MediaStatus.planning) {
-            return false;
-          }
-
-          final releaseDate = item.releaseDate;
-
-          if (releaseDate == null) {
-            return false;
-          }
-
-          final dateOnly = DateTime(
-            releaseDate.year,
-            releaseDate.month,
-            releaseDate.day,
-          );
-
-          return !dateOnly.isBefore(today);
-        })
-        .toList()
-      ..sort(
-        (a, b) {
-          return a.releaseDate!
-              .compareTo(b.releaseDate!);
-        },
-      );
-
-    return items.map((item) {
-      final releaseDate = item.releaseDate!;
-
-      return HomeSectionEntry(
-        movie: _movieFromLibraryItem(item),
-        heroTag: 'home-movie-${item.id}',
-        primaryText: item.title,
-        secondaryText:
-            _relativeFromToday(releaseDate),
-        tertiaryText: _formatDate(releaseDate),
-      );
-    }).toList();
-  }
-
-  List<HomeSectionEntry> _buildResumeItems(
-    List<TvProgress> shows,
-  ) {
-    final items = shows
-        .where(
-          (show) =>
-              show.hasStarted && !show.isFinished,
-        )
-        .toList()
-      ..sort(
-        (a, b) {
-          final progressCompare =
-              b.watchedEpisodes.compareTo(
-            a.watchedEpisodes,
-          );
-
-          if (progressCompare != 0) {
-            return progressCompare;
-          }
-
-          return a.title.toLowerCase().compareTo(
-                b.title.toLowerCase(),
-              );
-        },
-      );
-
-    return items.map((show) {
-      return HomeSectionEntry(
-        movie: _movieFromTvProgress(show),
-        heroTag: 'home-resume-${show.id}',
-        primaryText: _episodeLabel(
-          season: show.currentSeason,
-          episode: show.currentEpisode,
-        ),
-      );
-    }).toList();
-  }
-
   Widget _buildSection(
     BuildContext context, {
     required String title,
     required List<HomeSectionEntry> items,
   }) {
     final scheme = Theme.of(context).colorScheme;
-
-    final previewItems =
-        items.take(_previewCount).toList();
+    final previewItems = items.take(_previewCount).toList();
 
     return RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.only(bottom: 28),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             InkWell(
               onTap: () {
@@ -465,7 +455,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                     primaryText: entry.primaryText,
                     secondaryText: entry.secondaryText,
                     tertiaryText: entry.tertiaryText,
+                    isWatched: entry.isWatched,
                     sourceTab: 'home',
+                    cardWidth: 150,
                   );
                 },
               ),
@@ -526,28 +518,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       posterPath: item.posterPath,
       backdropPath: item.backdropPath,
       voteAverage: 0,
-      releaseDate:
-          item.releaseDate?.toIso8601String() ?? '',
+      releaseDate: item.releaseDate?.toIso8601String() ?? '',
       popularity: 0,
       originalLanguage: '',
       mediaType: item.mediaType,
-    );
-  }
-
-  static Movie _movieFromTvProgress(
-    TvProgress show,
-  ) {
-    return Movie(
-      id: show.id,
-      title: show.title,
-      overview: '',
-      posterPath: show.posterPath,
-      backdropPath: '',
-      voteAverage: 0,
-      releaseDate: '',
-      popularity: 0,
-      originalLanguage: '',
-      mediaType: 'tv',
     );
   }
 
@@ -555,11 +529,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     required int season,
     required int episode,
   }) {
-    final formattedSeason =
-        season.toString().padLeft(2, '0');
-
-    final formattedEpisode =
-        episode.toString().padLeft(2, '0');
+    final formattedSeason = season.toString().padLeft(2, '0');
+    final formattedEpisode = episode.toString().padLeft(2, '0');
 
     return 'S$formattedSeason E$formattedEpisode';
   }
@@ -574,6 +545,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  static bool _isToday(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dateOnly = DateTime(date.year, date.month, date.day);
+    return dateOnly == today;
+  }
+
   static String _relativeFromToday(
     DateTime date,
   ) {
@@ -585,8 +563,11 @@ class _HomePageState extends ConsumerState<HomePage> {
       date.day,
     );
 
-    final difference =
-        target.difference(today).inDays;
+    final difference = target.difference(today).inDays;
+
+    if (difference == 0) {
+      return 'Today';
+    }
 
     if (difference <= 0) {
       return 'Today';
@@ -639,9 +620,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       'Dec',
     ];
 
-    return '${date.day} '
-        '${months[date.month - 1]} '
-        '${date.year}';
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
   }
 }
 

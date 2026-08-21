@@ -10,18 +10,19 @@ class HomeMediaCard extends StatelessWidget {
   final String primaryText;
   final String? secondaryText;
   final String? tertiaryText;
-  final double? cardWidth;
+  final bool isWatched;
   final String sourceTab;
+  final double cardWidth;
 
   const HomeMediaCard({
-    super.key,
     required this.movie,
     required this.heroTag,
     required this.primaryText,
     this.secondaryText,
     this.tertiaryText,
-    this.cardWidth = 100,
-    this.sourceTab = 'home',
+    this.isWatched = false,
+    required this.sourceTab,
+    required this.cardWidth,
   });
 
   String get _detailsPath {

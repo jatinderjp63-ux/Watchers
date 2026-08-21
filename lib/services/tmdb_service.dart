@@ -242,4 +242,12 @@ class TmdbService {
 
     return credits;
   }
+
+  /// Fetch raw TV show metadata from /tv/{id}.
+  /// Use this to get authoritative `number_of_seasons` and other fields.
+  Future<Map<String, dynamic>> getRawTvMetadata(int tvId) async {
+    final response = await _client.get('/tv/$tvId');
+    final data = response.data as Map<String, dynamic>;
+    return Map<String, dynamic>.from(data);
+  }
 }

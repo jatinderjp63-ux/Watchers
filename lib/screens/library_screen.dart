@@ -8,6 +8,7 @@ import '../models/media_library_item.dart';
 import '../models/media_status.dart';
 import '../models/movie.dart';
 import '../providers/library_provider.dart';
+import '../providers/tv_library_sections_provider.dart';
 import '../services/tab_navigation_service.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
@@ -53,12 +54,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         .where((item) => item.mediaType == 'movie')
         .toList();
 
-    final tvItems = library
-        .where((item) => item.mediaType == 'tv')
-        .toList();
+    final tvSectionsAsync = ref.watch(tvLibrarySectionsProvider);
 
     Future<void> refreshLibrary() async {
       await ref.read(libraryProvider.notifier).loadLibrary();
+      await ref.read(tvLibrarySectionsProvider.future);
     }
 
     return SafeArea(
@@ -117,17 +117,53 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             },
             body: TabBarView(
               children: [
-                _LibraryCategoryView(
-                  title: 'Movies',
+                _MovieLibraryCategoryView(
                   items: movieItems,
-                  includeDropped: false,
                   onRefresh: refreshLibrary,
                 ),
-                _LibraryCategoryView(
-                  title: 'Shows',
-                  items: tvItems,
-                  includeDropped: true,
-                  onRefresh: refreshLibrary,
+                tvSectionsAsync.when(
+                  loading: () {
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  },
+                  error: (_, __) {
+                    final tvItems = library
+                        .where((item) => item.mediaType == 'tv')
+                        .toList();
+
+                    return _ShowLibraryCategoryView(
+                      planned: tvItems
+                          .where(
+                            (item) =>
+                                item.status == MediaStatus.planning,
+                          )
+                          .toList(),
+                      watching: const [],
+                      watched: tvItems
+                          .where(
+                            (item) =>
+                                item.status == MediaStatus.watched,
+                          )
+                          .toList(),
+                      dropped: tvItems
+                          .where(
+                            (item) =>
+                                item.status == MediaStatus.dropped,
+                          )
+                          .toList(),
+                      onRefresh: refreshLibrary,
+                    );
+                  },
+                  data: (sections) {
+                    return _ShowLibraryCategoryView(
+                      planned: sections.planned,
+                      watching: sections.watching,
+                      watched: sections.watched,
+                      dropped: sections.dropped,
+                      onRefresh: refreshLibrary,
+                    );
+                  },
                 ),
               ],
             ),
@@ -138,16 +174,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   }
 }
 
-class _LibraryCategoryView extends StatelessWidget {
-  final String title;
+class _MovieLibraryCategoryView extends StatelessWidget {
   final List<MediaLibraryItem> items;
-  final bool includeDropped;
   final Future<void> Function() onRefresh;
 
-  const _LibraryCategoryView({
-    required this.title,
+  const _MovieLibraryCategoryView({
     required this.items,
-    required this.includeDropped,
     required this.onRefresh,
   });
 
@@ -161,45 +193,121 @@ class _LibraryCategoryView extends StatelessWidget {
         .where((item) => item.status == MediaStatus.watched)
         .toList();
 
-    final dropped = items
-        .where((item) => item.status == MediaStatus.dropped)
-        .toList();
+    return _LibrarySectionsList(
+      categoryTitle: 'Movies',
+      sections: [
+        _LibrarySectionData(
+          title: 'Planned',
+          items: planned,
+          emptyMessage: 'Nothing planned yet.',
+        ),
+        _LibrarySectionData(
+          title: 'Watched',
+          items: watched,
+          emptyMessage: 'Nothing watched yet.',
+        ),
+      ],
+      onRefresh: onRefresh,
+    );
+  }
+}
 
+class _ShowLibraryCategoryView extends StatelessWidget {
+  final List<MediaLibraryItem> planned;
+  final List<MediaLibraryItem> watching;
+  final List<MediaLibraryItem> watched;
+  final List<MediaLibraryItem> dropped;
+  final Future<void> Function() onRefresh;
+
+  const _ShowLibraryCategoryView({
+    required this.planned,
+    required this.watching,
+    required this.watched,
+    required this.dropped,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _LibrarySectionsList(
+      categoryTitle: 'Shows',
+      sections: [
+        _LibrarySectionData(
+          title: 'Planned',
+          items: planned,
+          emptyMessage: 'Nothing planned yet.',
+        ),
+        _LibrarySectionData(
+          title: 'Watching',
+          items: watching,
+          emptyMessage: 'Start an episode to see shows here.',
+        ),
+        _LibrarySectionData(
+          title: 'Watched',
+          items: watched,
+          emptyMessage: 'Nothing completed yet.',
+        ),
+        _LibrarySectionData(
+          title: 'Dropped',
+          items: dropped,
+          emptyMessage: 'Nothing dropped yet.',
+        ),
+      ],
+      onRefresh: onRefresh,
+    );
+  }
+}
+
+class _LibrarySectionData {
+  final String title;
+  final List<MediaLibraryItem> items;
+  final String emptyMessage;
+
+  const _LibrarySectionData({
+    required this.title,
+    required this.items,
+    required this.emptyMessage,
+  });
+}
+
+class _LibrarySectionsList extends StatelessWidget {
+  final String categoryTitle;
+  final List<_LibrarySectionData> sections;
+  final Future<void> Function() onRefresh;
+
+  const _LibrarySectionsList({
+    required this.categoryTitle,
+    required this.sections,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return RefreshIndicator(
       onRefresh: onRefresh,
-      child: ListView(
+      child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 140),
-        children: [
-          _buildSection(
+        itemCount: sections.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 28),
+        itemBuilder: (context, index) {
+          final section = sections[index];
+
+          return _buildSection(
             context: context,
-            sectionTitle: 'Planned',
-            sectionItems: planned,
-            emptyMessage: 'Nothing planned yet.',
-          ),
-          const SizedBox(height: 28),
-          _buildSection(
-            context: context,
-            sectionTitle: 'Watched',
-            sectionItems: watched,
-            emptyMessage: 'Nothing watched yet.',
-          ),
-          if (includeDropped) ...[
-            const SizedBox(height: 28),
-            _buildSection(
-              context: context,
-              sectionTitle: 'Dropped',
-              sectionItems: dropped,
-              emptyMessage: 'Nothing dropped yet.',
-            ),
-          ],
-        ],
+            categoryTitle: categoryTitle,
+            sectionTitle: section.title,
+            sectionItems: section.items,
+            emptyMessage: section.emptyMessage,
+          );
+        },
       ),
     );
   }
 
   Widget _buildSection({
     required BuildContext context,
+    required String categoryTitle,
     required String sectionTitle,
     required List<MediaLibraryItem> sectionItems,
     required String emptyMessage,
@@ -216,7 +324,7 @@ class _LibraryCategoryView extends StatelessWidget {
                   context.push(
                     '/library/section',
                     extra: {
-                      'title': '$title $sectionTitle',
+                      'title': '$categoryTitle $sectionTitle',
                       'items': sectionItems.map(_toEntry).toList(),
                       'sourceTab': 'library',
                     },

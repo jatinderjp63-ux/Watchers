@@ -6,6 +6,7 @@ class HomeSectionEntry {
   final String primaryText;
   final String? secondaryText;
   final String? tertiaryText;
+  final bool isWatched;
 
   const HomeSectionEntry({
     required this.movie,
@@ -13,5 +14,6 @@ class HomeSectionEntry {
     required this.primaryText,
     this.secondaryText,
     this.tertiaryText,
+    this.isWatched = false,
   });
 }

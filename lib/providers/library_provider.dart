@@ -77,6 +77,16 @@ class LibraryNotifier
         status == MediaStatus.watched &&
         oldStatus != MediaStatus.watched) {
       final tvNotifier = _ref.read(tvProgressProvider.notifier);
+
+      // Ensure the progress record exists
+      await tvNotifier.ensureShow(
+        id: id,
+        title: item.title,
+        posterPath: item.posterPath,
+        totalEpisodes: 0,
+        totalSeasons: 0,
+      );
+
       await tvNotifier.markAllReleasedEpisodesWatched(id);
     }
 
@@ -101,6 +111,15 @@ class LibraryNotifier
           status == MediaStatus.watched &&
           oldStatus != MediaStatus.watched) {
         final tvNotifier = _ref.read(tvProgressProvider.notifier);
+
+        await tvNotifier.ensureShow(
+          id: movie.id,
+          title: existing.title,
+          posterPath: existing.posterPath,
+          totalEpisodes: 0,
+          totalSeasons: 0,
+        );
+
         await tvNotifier.markAllReleasedEpisodesWatched(movie.id);
       }
 

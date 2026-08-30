@@ -81,7 +81,6 @@ class TvProgressSnapshot {
   }
 
   /// The first unwatched dated episode released before today.
-  /// This is the only kind of episode eligible for Resume.
   TvEpisodePosition? get nextUnwatchedPastEpisode {
     final today = _todayOnly();
 
@@ -158,7 +157,9 @@ class TvProgressSnapshot {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day);
   }
-}class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
+}
+
+class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   TvProgressNotifier(this._service, this._tmdbService) : super([]) {
     load();
   }
@@ -196,15 +197,18 @@ class TvProgressSnapshot {
     }
   }
 
+  /// Ensures a TvProgress record exists for the given show.
   Future<TvProgress> ensureShow({
     required int id,
     required String title,
     required String posterPath,
-    required int totalEpisodes,
-    required int totalSeasons,
+    int totalEpisodes = 0,
+    int totalSeasons = 0,
   }) async {
+    debugPrint('TvProgressNotifier: ensureShow called: id=$id, title=$title');
     final existing = getShowById(id);
     if (existing != null) {
+      debugPrint('TvProgressNotifier: ensureShow: found existing progress for id=$id');
       return existing;
     }
 
@@ -222,22 +226,11 @@ class TvProgressSnapshot {
 
     _replaceShow(created);
     await _save();
+    debugPrint('TvProgressNotifier: ensureShow: created new progress for id=$id');
     return created;
   }
 
-  /// Returns a snapshot only for shows that already have a persisted
-  /// TV-progress record.
-  Future<TvProgressSnapshot?> getSnapshot(int id) async {
-    final progress = getShowById(id);
-    if (progress == null) {
-      return null;
-    }
-
-    return _buildSnapshot(progress);
-  }
-
-  /// Creates a neutral empty-progress snapshot for a Library TV show.
-  /// This lets Airing work before the user has visited Episodes.
+  /// Returns a snapshot for a show, creating a progress record if needed.
   Future<TvProgressSnapshot> getSnapshotForShow({
     required int id,
     required String title,
@@ -245,6 +238,7 @@ class TvProgressSnapshot {
     int totalEpisodes = 0,
     int totalSeasons = 0,
   }) async {
+    debugPrint('TvProgressNotifier: getSnapshotForShow called: id=$id');
     final existing = getShowById(id);
 
     final progress = existing ??
@@ -263,7 +257,9 @@ class TvProgressSnapshot {
     return _buildSnapshot(progress);
   }
 
+  /// Internal snapshot builder used by both public methods.
   Future<TvProgressSnapshot> _buildSnapshot(TvProgress progress) async {
+    debugPrint('TvProgressNotifier: _buildSnapshot called: id=${progress.id}');
     final allEpisodes = await _getEpisodeCatalog(progress.id);
     final today = _todayOnly();
 
@@ -274,7 +270,6 @@ class TvProgressSnapshot {
     for (final episode in allEpisodes) {
       final airDate = episode.airDate;
 
-      // Missing TMDB dates are deliberately treated as unreleased/unknown.
       if (airDate == null) {
         continue;
       }
@@ -299,19 +294,8 @@ class TvProgressSnapshot {
     _sortEpisodes(todayEpisodes);
     _sortEpisodes(futureEpisodes);
 
-    final migratedProgress = _migrateLegacyProgress(
-      progress,
-      releasedEpisodes,
-      allEpisodes,
-    );
-
-    if (!identical(migratedProgress, progress)) {
-      _replaceShow(migratedProgress);
-      await _save();
-    }
-
     return TvProgressSnapshot(
-      progress: migratedProgress,
+      progress: progress,
       releasedEpisodes: releasedEpisodes,
       allEpisodes: allEpisodes,
       todayEpisodes: todayEpisodes,
@@ -319,287 +303,223 @@ class TvProgressSnapshot {
     );
   }
 
-  TvProgress _migrateLegacyProgress(
-    TvProgress progress,
-    List<TvEpisodePosition> releasedEpisodes,
-    List<TvEpisodePosition> allEpisodes,
-  ) {
-    // If already using the new key format, or no legacy data, return as-is.
-    if (progress.watchedEpisodeKeys.isNotEmpty) {
-      final sampleKey = progress.watchedEpisodeKeys.first;
-      if (sampleKey.contains(':s') && sampleKey.contains('e')) {
-        // Already new format "$tvId:s${season}e${episode}"
-        return progress;
-      }
-    }
-
-    if (progress.watchedEpisodes <= 0 || releasedEpisodes.isEmpty) {
-      return progress;
-    }
-
-    final count = progress.watchedEpisodes.clamp(
-      0,
-      releasedEpisodes.length,
-    );
-
-    // Migrate from old "${season}:${episode}" keys to new "$tvId:s${season}e${episode}"
-    final keys = <String>{};
-    for (var i = 0; i < count; i++) {
-      final ep = releasedEpisodes[i];
-      keys.add(ep.key); // new format
-    }
-
-    final last = count == 0 ? null : releasedEpisodes[count - 1];
-
-    return progress.copyWith(
-      watchedEpisodeKeys: keys,
-      watchedEpisodes: keys.length,
-      currentSeason: last?.seasonNumber ?? 1,
-      currentEpisode: last?.episodeNumber ?? 1,
-      totalEpisodes: allEpisodes.isNotEmpty
-          ? allEpisodes.length
-          : progress.totalEpisodes,
-      totalSeasons: _totalSeasonCount(
-        allEpisodes,
-        fallback: progress.totalSeasons,
-      ),
-      clearLastWatchedAt: count == 0,
-    );
-  }  /// A direct one-key toggle for a single episode.
-  /// - If the episode is watched, it becomes unwatched.
-  /// - If the episode is unwatched and released, it becomes watched.
-  /// This does NOT auto-mark earlier episodes; it is strict single-episode.
-  Future<void> toggleEpisodeWatchedAt(
-    int id,
-    int seasonNumber,
-    int episodeNumber,
-  ) async {
-    final snapshot = await getSnapshot(id);
-
-    if (snapshot == null ||
-        !snapshot.isEpisodeReleased(seasonNumber, episodeNumber)) {
+  /// Mark an episode and all earlier released episodes (across all seasons)
+  /// as watched.
+  Future<void> markWatchedUpToEpisode({
+    required int tvId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    debugPrint('TvProgressNotifier: markWatchedUpToEpisode called: tvId=$tvId, S$seasonNumber E$episodeNumber');
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisode: no progress found for tvId=$tvId');
       return;
     }
 
-    final keys = {...snapshot.watchedKeys};
-    final key = '$id:s${seasonNumber}e$episodeNumber';
-
-    if (keys.contains(key)) {
-      keys.remove(key);
-    } else {
-      keys.add(key);
-    }
-
-    await _applyWatchedKeys(snapshot, keys);
-  }
-
-  /// Episode-tick interaction used by the TV details page:
-  ///
-  /// - Tapping an unwatched released episode marks it and every earlier
-  ///   released episode as watched.
-  /// - Tapping an already watched episode unmarks only that exact episode.
-  /// - Future/no-date episodes are rejected.
-  Future<void> toggleEpisodeProgressAt(
-    int id,
-    int seasonNumber,
-    int episodeNumber,
-  ) async {
-    final snapshot = await getSnapshot(id);
-
-    if (snapshot == null ||
-        !snapshot.isEpisodeReleased(seasonNumber, episodeNumber)) {
+    final snapshot = await _buildSnapshot(progress);
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisode: no released episodes for tvId=$tvId');
       return;
     }
 
-    final targetKey = '$id:s${seasonNumber}e$episodeNumber';
-    final keys = {...snapshot.watchedKeys};
+    final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
 
-    if (keys.contains(targetKey)) {
-      // Only the pressed episode is removed. Earlier and later keys stay.
-      keys.remove(targetKey);
-      await _applyWatchedKeys(snapshot, keys);
-      return;
-    }
-
-    // Mark every earlier released episode, plus the selected episode.
-    for (final episode in snapshot.releasedEpisodes) {
-      keys.add(episode.key);
-
-      if (episode.key == targetKey) {
+    int targetIndex = -1;
+    for (var i = 0; i < snapshot.releasedEpisodes.length; i++) {
+      final ep = snapshot.releasedEpisodes[i];
+      if (ep.key == targetKey) {
+        targetIndex = i;
         break;
       }
     }
 
+    if (targetIndex < 0) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisode: target episode not found in released list');
+      return;
+    }
+
+    final keys = {...snapshot.watchedKeys};
+
+    for (var i = 0; i <= targetIndex; i++) {
+      keys.add(snapshot.releasedEpisodes[i].key);
+    }
+
+    debugPrint('TvProgressNotifier: markWatchedUpToEpisode: marking ${keys.length} episodes as watched');
     await _applyWatchedKeys(snapshot, keys);
   }
 
-  Future<void> markEpisodeWatchedAt(
-    int id,
+  /// Unmark an episode and all later released episodes (across all seasons)
+  /// as unwatched.
+  Future<void> markUnwatchedFromEpisode({
+    required int tvId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    debugPrint('TvProgressNotifier: markUnwatchedFromEpisode called: tvId=$tvId, S$seasonNumber E$episodeNumber');
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: markUnwatchedFromEpisode: no progress found for tvId=$tvId');
+      return;
+    }
+
+    final snapshot = await _buildSnapshot(progress);
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint('TvProgressNotifier: markUnwatchedFromEpisode: no released episodes for tvId=$tvId');
+      return;
+    }
+
+    final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
+
+    int targetIndex = -1;
+    for (var i = 0; i < snapshot.releasedEpisodes.length; i++) {
+      final ep = snapshot.releasedEpisodes[i];
+      if (ep.key == targetKey) {
+        targetIndex = i;
+        break;
+      }
+    }
+
+    if (targetIndex < 0) {
+      debugPrint('TvProgressNotifier: markUnwatchedFromEpisode: target episode not found in released list');
+      return;
+    }
+
+    final keys = {...snapshot.watchedKeys};
+
+    for (var i = targetIndex; i < snapshot.releasedEpisodes.length; i++) {
+      keys.remove(snapshot.releasedEpisodes[i].key);
+    }
+
+    debugPrint('TvProgressNotifier: markUnwatchedFromEpisode: resulting watched count=${keys.length}');
+    await _applyWatchedKeys(snapshot, keys);
+  }
+
+  /// Episode tick interaction:
+  /// - If episode is unwatched and released: markWatchedUpToEpisode
+  /// - If episode is watched and released: markUnwatchedFromEpisode
+  /// - If episode is not released: do nothing.
+  Future<void> toggleEpisodeProgressAt(
+    int tvId,
     int seasonNumber,
     int episodeNumber,
   ) async {
-    final snapshot = await getSnapshot(id);
-
-    if (snapshot == null ||
-        !snapshot.isEpisodeReleased(seasonNumber, episodeNumber)) {
+    debugPrint('TvProgressNotifier: toggleEpisodeProgressAt called: tvId=$tvId, S$seasonNumber E$episodeNumber');
+    final progress = getShowById(tvId);
+    debugPrint('TvProgressNotifier: progress found: ${progress != null}, id=${progress?.id}');
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: toggleEpisodeProgressAt: no progress found, returning');
       return;
     }
 
-    final keys = {...snapshot.watchedKeys};
-    keys.add('$id:s${seasonNumber}e$episodeNumber');
+    final snapshot = await _buildSnapshot(progress);
 
-    await _applyWatchedKeys(snapshot, keys);
+    final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
+
+    final isReleased = snapshot.releasedEpisodes.any(
+      (ep) => ep.seasonNumber == seasonNumber && ep.episodeNumber == episodeNumber,
+    );
+
+    if (!isReleased) {
+      debugPrint('TvProgressNotifier: toggleEpisodeProgressAt: episode not released, ignoring');
+      return;
+    }
+
+    final isWatched = progress.watchedEpisodeKeys.contains(targetKey);
+    debugPrint('TvProgressNotifier: toggleEpisodeProgressAt: isWatched=$isWatched, targetKey=$targetKey');
+
+    if (isWatched) {
+      await markUnwatchedFromEpisode(
+        tvId: tvId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+      );
+    } else {
+      await markWatchedUpToEpisode(
+        tvId: tvId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+      );
+    }
   }
 
+  /// Season button interaction:
+  /// - If all released episodes in the season are watched:
+  ///     unmark all released episodes in that season.
+  /// - Otherwise:
+  ///     mark all released episodes in that season as watched.
   Future<void> toggleSeasonWatched(
-    int id,
+    int tvId,
     int seasonNumber,
   ) async {
-    final snapshot = await getSnapshot(id);
-    if (snapshot == null) {
+    debugPrint('TvProgressNotifier: toggleSeasonWatched called: tvId=$tvId, season=$seasonNumber');
+    final progress = getShowById(tvId);
+    debugPrint('TvProgressNotifier: progress found: ${progress != null}, id=${progress?.id}');
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: toggleSeasonWatched: no progress found, returning');
       return;
     }
 
+    final snapshot = await _buildSnapshot(progress);
+
     final seasonReleased = snapshot.releasedEpisodes
-        .where((episode) => episode.seasonNumber == seasonNumber)
+        .where((ep) => ep.seasonNumber == seasonNumber)
         .toList();
 
     if (seasonReleased.isEmpty) {
+      debugPrint('TvProgressNotifier: toggleSeasonWatched: no released episodes in season $seasonNumber');
       return;
     }
 
-    final keys = {...snapshot.watchedKeys};
-    final seasonIsFullyWatched = seasonReleased.every(
-      (episode) => keys.contains(episode.key),
+    final allWatched = seasonReleased.every(
+      (ep) => progress.watchedEpisodeKeys.contains(ep.key),
     );
 
-    if (seasonIsFullyWatched) {
-      // Only remove released episodes of the selected season.
-      for (final episode in seasonReleased) {
-        keys.remove(episode.key);
+    debugPrint('TvProgressNotifier: toggleSeasonWatched: allWatched=$allWatched, seasonReleased count=${seasonReleased.length}');
+
+    final keys = {...progress.watchedEpisodeKeys};
+
+    if (allWatched) {
+      for (final ep in seasonReleased) {
+        keys.remove(ep.key);
       }
     } else {
-      // Only add dated episodes released up through today.
-      for (final episode in seasonReleased) {
-        keys.add(episode.key);
+      for (final ep in seasonReleased) {
+        keys.add(ep.key);
       }
     }
 
+    debugPrint('TvProgressNotifier: toggleSeasonWatched: resulting watched count=${keys.length}');
     await _applyWatchedKeys(snapshot, keys);
   }
 
-  Future<void> markSeasonWatched(
-    int id,
-    int seasonNumber,
-  ) async {
-    final snapshot = await getSnapshot(id);
-    if (snapshot == null) {
+  /// Mark all released episodes across all seasons as watched.
+  Future<void> markAllReleasedEpisodesWatched(int tvId) async {
+    debugPrint('TvProgressNotifier: markAllReleasedEpisodesWatched called: tvId=$tvId');
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: markAllReleasedEpisodesWatched: no progress found for tvId=$tvId');
       return;
     }
 
-    final keys = {...snapshot.watchedKeys};
+    final snapshot = await _buildSnapshot(progress);
 
-    for (final episode in snapshot.releasedEpisodes) {
-      if (episode.seasonNumber == seasonNumber) {
-        keys.add(episode.key);
-      }
+    final keys = {...progress.watchedEpisodeKeys};
+
+    for (final ep in snapshot.releasedEpisodes) {
+      keys.add(ep.key);
     }
 
+    debugPrint('TvProgressNotifier: markAllReleasedEpisodesWatched: marking ${keys.length} episodes as watched');
     await _applyWatchedKeys(snapshot, keys);
   }
 
-  Future<void> markAllReleasedEpisodesWatched(int id) async {
-    final snapshot = await getSnapshot(id);
-    if (snapshot == null) {
-      return;
-    }
-
-    final keys = {...snapshot.watchedKeys};
-
-    for (final episode in snapshot.releasedEpisodes) {
-      keys.add(episode.key);
-    }
-
-    await _applyWatchedKeys(snapshot, keys);
-  }
-
-  Future<void> clearEpisodeProgress(int id) async {
-    final snapshot = await getSnapshot(id);
-    if (snapshot == null) {
-      return;
-    }
-
-    await _applyWatchedKeys(
-      snapshot,
-      const <String>{},
-    );
-  }
-
-  Future<void> setProgress({
-    required int id,
-    required int season,
-    required int episode,
-    int? watchedEpisodes,
-    int? totalEpisodes,
-  }) async {
-    final existing = getShowById(id);
-    if (existing == null) {
-      return;
-    }
-
-    if (watchedEpisodes != null) {
-      final snapshot = await getSnapshot(id);
-      if (snapshot == null) {
-        return;
-      }
-
-      final count = watchedEpisodes.clamp(
-        0,
-        snapshot.releasedEpisodes.length,
-      );
-
-      final keys = snapshot.releasedEpisodes
-          .take(count)
-          .map((item) => item.key)
-          .toSet();
-
-      await _applyWatchedKeys(
-        snapshot,
-        keys,
-        totalEpisodesOverride: totalEpisodes,
-      );
-      return;
-    }
-
-    final updated = existing.copyWith(
-      currentSeason: season < 1 ? 1 : season,
-      currentEpisode: episode < 1 ? 1 : episode,
-      totalEpisodes: totalEpisodes ?? existing.totalEpisodes,
-      lastWatchedAt: DateTime.now(),
-    );
-
-    _replaceShow(_normalizeShow(updated));
-    await _save();
-  }
-
-  Future<void> markEpisodeWatched(int id) async {
-    final snapshot = await getSnapshot(id);
-    final next = snapshot?.nextUnwatchedPastEpisode;
-
-    if (next == null) {
-      return;
-    }
-
-    await markEpisodeWatchedAt(
-      id,
-      next.seasonNumber,
-      next.episodeNumber,
-    );
-  }  Future<void> _applyWatchedKeys(
+  Future<void> _applyWatchedKeys(
     TvProgressSnapshot snapshot,
     Set<String> rawKeys, {
     int? totalEpisodesOverride,
   }) async {
+    debugPrint('TvProgressNotifier: _applyWatchedKeys called: rawKeys count=${rawKeys.length}');
     final allowedKeys = snapshot.allEpisodes
         .map((episode) => episode.key)
         .toSet();
@@ -609,6 +529,8 @@ class TvProgressSnapshot {
     final watchedEpisodes = snapshot.releasedEpisodes
         .where((episode) => keys.contains(episode.key))
         .length;
+
+    debugPrint('TvProgressNotifier: _applyWatchedKeys: filtered keys count=${keys.length}, watchedEpisodes=$watchedEpisodes');
 
     final watchedReleased = snapshot.releasedEpisodes
         .where((episode) => keys.contains(episode.key))
@@ -637,6 +559,7 @@ class TvProgressSnapshot {
     );
 
     _replaceShow(_normalizeShow(updated));
+    debugPrint('TvProgressNotifier: _applyWatchedKeys: saved progress for id=${updated.id}');
     await _save();
   }
 
@@ -703,7 +626,7 @@ class TvProgressSnapshot {
           );
         }
       } catch (error) {
-        debugPrint('TV catalog error for $tvId S$season: $error');
+        debugPrint('TvProgressNotifier: TV catalog error for $tvId S$season: $error');
       }
     }
 
@@ -827,17 +750,14 @@ class TvProgressSnapshot {
   }
 
   bool _isEpisodeKey(String value) {
-    // Accept both old and new formats, but normalize to new:
-    // Old: "${season}:${episode}"
-    // New: "$tvId:s${season}e${episode}"
     if (value.contains(':s') && value.contains('e')) {
       final parts = value.split(':');
       if (parts.length != 3) {
         return false;
       }
       final tvId = int.tryParse(parts[0]);
-      final seasonPart = parts[1]; // "s{season}"
-      final episodePart = parts[2]; // "e{episode}"
+      final seasonPart = parts[1];
+      final episodePart = parts[2];
 
       if (tvId == null ||
           !seasonPart.startsWith('s') ||
@@ -854,7 +774,6 @@ class TvProgressSnapshot {
           episode > 0;
     }
 
-    // Legacy format: "${season}:${episode}"
     final parts = value.split(':');
     if (parts.length != 2) {
       return false;
@@ -873,7 +792,29 @@ class TvProgressSnapshot {
     try {
       await _service.save(state);
     } catch (error) {
-      debugPrint('TV progress save error: $error');
+      debugPrint('TvProgressNotifier: TV progress save error: $error');
     }
+  }
+
+  // Compatibility methods for existing callers
+
+  Future<TvProgressSnapshot?> getSnapshot(int id) async {
+    debugPrint('TvProgressNotifier: getSnapshot called: id=$id');
+    final progress = getShowById(id);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: getSnapshot: no progress found for id=$id');
+      return null;
+    }
+    return _buildSnapshot(progress);
+  }
+
+  /// Kept for compatibility; now uses the same logic as toggleEpisodeProgressAt.
+  Future<void> toggleEpisodeWatchedAt(
+    int id,
+    int seasonNumber,
+    int episodeNumber,
+  ) async {
+    debugPrint('TvProgressNotifier: toggleEpisodeWatchedAt called (compat): id=$id, S$seasonNumber E$episodeNumber');
+    await toggleEpisodeProgressAt(id, seasonNumber, episodeNumber);
   }
 }

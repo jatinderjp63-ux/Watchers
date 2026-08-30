@@ -12,11 +12,11 @@ import '../models/media_status.dart';
 import '../models/movie.dart';
 import '../models/movie_details.dart';
 import '../models/tv_progress.dart';
+import '../providers/tv_progress_provider.dart';
 import '../services/media_library_service.dart';
 import '../services/metadata_refresh_service.dart';
 import '../services/retry_helper.dart';
 import '../services/tmdb_service.dart';
-import '../providers/tv_progress_provider.dart';
 import 'episode_details_screen.dart';
 
 class TvDetailsScreen extends ConsumerStatefulWidget {
@@ -54,8 +54,6 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   int? _selectedSeason;
   Future<MediaLibraryItem?>? _itemFuture;
 
-  final Map<String, int> _episodeCountCache = {};
-
   String get _mediaType => 'tv';
 
   String get _detailsKey {
@@ -82,6 +80,19 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
 
     _itemFuture = _libraryService.getItem(widget.show.id);
     _loadDetails();
+    _ensureTvProgressRecord();
+  }
+
+  Future<void> _ensureTvProgressRecord() async {
+    final notifier = ref.read(tvProgressProvider.notifier);
+
+    await notifier.ensureShow(
+      id: widget.show.id,
+      title: widget.show.title,
+      posterPath: widget.show.posterPath,
+      totalEpisodes: 0,
+      totalSeasons: 0,
+    );
   }
 
   Future<void> _loadDetails({
@@ -379,6 +390,35 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   String? _detailsPosterUrl(MovieDetails? show) {
     final value = show?.posterUrl.trim() ?? '';
     return value.isEmpty ? null : value;
+  }
+
+  bool _isEpisodeReleased(Map<String, dynamic> episode) {
+    final value = episode['air_date']?.toString().trim() ?? '';
+    final airDate = DateTime.tryParse(value);
+
+    if (airDate == null) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final episodeDay = DateTime(airDate.year, airDate.month, airDate.day);
+
+    return !episodeDay.isAfter(today);
+  }
+
+  String _episodeKey(int seasonNumber, int episodeNumber) {
+    return '${widget.show.id}:s${seasonNumber}e$episodeNumber';
+  }
+
+  String _watchedKeysSignature(TvProgress? progress) {
+    if (progress == null || progress.watchedEpisodeKeys.isEmpty) {
+      return 'empty';
+    }
+
+    final keys = List<String>.from(progress.watchedEpisodeKeys);
+    keys.sort();
+    return keys.join('|');
   }
 
   Widget _buildShowStatusButtons() {
@@ -752,41 +792,1012 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
             ? _buildShowOverview(show!)
             : _buildOverviewSkeleton();
     }
-  }  int _watchedInSelectedSeason(
-    TvProgress? progress,
-    int selectedSeason,
-    int episodeCount,
-  ) {
-    if (progress == null || episodeCount == 0 || progress.totalSeasons == 0) {
-      return 0;
+  }
+
+  Widget _buildTvPage() {
+    final scheme = Theme.of(context).colorScheme;
+
+    final tvProgress = ref.watch(tvProgressProvider);
+    final notifier = ref.read(tvProgressProvider.notifier);
+
+    TvProgress? progressItem;
+    for (final item in tvProgress) {
+      if (item.id == widget.show.id) {
+        progressItem = item;
+        break;
+      }
     }
 
-    if (progress.currentSeason > selectedSeason) {
-      return episodeCount;
+    final show = details;
+
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: () async {
+          final currentSeason = _selectedSeason ?? 1;
+
+          await _refreshDetailsSilently();
+
+          if (_selectedSeason != currentSeason) {
+            setState(() {
+              _selectedSeason = currentSeason;
+            });
+
+            _loadSeasonEpisodes(currentSeason);
+          }
+        },
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverAppBar(
+              pinned: true,
+              expandedHeight: 470,
+              backgroundColor: scheme.surface,
+              leading: IconButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back),
+              ),
+              flexibleSpace: FlexibleSpaceBar(
+                background: _buildPosterHeader(show),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 20, 16, 160),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      show?.title ?? widget.show.title,
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 27,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _buildShowStatusButtons(),
+                    const SizedBox(height: 24),
+                    _SegmentSelector(
+                      labels: const ['About', 'Episodes'],
+                      selectedIndex: _tvSelectedTab,
+                      onSelected: (index) {
+                        setState(() {
+                          _tvSelectedTab = index;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: KeyedSubtree(
+                        key: ValueKey<int>(_tvSelectedTab),
+                        child: _tvSelectedTab == 0
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildShowAboutSections(),
+                                  const SizedBox(height: 16),
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 180),
+                                    child: KeyedSubtree(
+                                      key: ValueKey<int>(_tvAboutSection),
+                                      child:
+                                          _buildShowAboutSelectedSection(show),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : _TvEpisodesList(
+                                showId: widget.show.id,
+                                selectedSeason: _selectedSeason ?? 1,
+                                onSeasonChange: (season) {
+                                  setState(() {
+                                    _selectedSeason = season;
+                                  });
+                                  _loadSeasonEpisodes(season);
+                                },
+                                episodes: _seasonEpisodes,
+                                episodesLoading: _episodesLoading,
+                                details: show,
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _posterPlaceholder() {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: 240,
+      height: 360,
+      color: scheme.surfaceContainerHighest,
+      child: Icon(
+        Icons.movie_outlined,
+        size: 60,
+        color: scheme.onSurfaceVariant,
+      ),
+    );
+  }
+
+  Widget _personPlaceholder() {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      color: scheme.surfaceContainerHighest,
+      child: Icon(Icons.person, color: scheme.onSurfaceVariant),
+    );
+  }
+
+  Widget _buildError() {
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: () => Navigator.of(context).maybePop(),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        title: Text(widget.show.title),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48),
+              const SizedBox(height: 12),
+              Text(
+                errorMessage ?? 'Something went wrong.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(
+                onPressed: () => _loadDetails(forceRefresh: true),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_initialLoadDone && details == null) {
+      return _buildError();
     }
 
-    if (progress.currentSeason < selectedSeason) {
-      return 0;
+    return _buildTvPage();
+  }
+}
+
+// -------------------------- Episodes list widget --------------------------
+
+class _TvEpisodesPerfect observation — the provider is saving correctly, but the episode list is still using an old `progressItem` that never changes, so `isWatched` is always computed from the initial empty set and the key signature is always `"empty"`.
+
+That’s why:
+
+- Tapping the tick updates the database (you see it in episode details).
+- The list never repaints with green ticks.
+- The season button never toggles its visual state.
+
+The fix is to make the episode list directly depend on `ref.watch(tvProgressProvider)` so that when the notifier updates `state`, the screen rebuilds with the new `progressItem`.
+
+Below is the corrected full replacement for `lib/screens/tv_details_screen.dart`. The provider file can stay exactly as I last sent it.
+
+---
+
+## Replace `lib/screens/tv_details_screen.dart` with this
+
+```dart
+import 'dart:ui';
+
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../models/cast_member.dart';
+import '../models/media_library_item.dart';
+import '../models/media_status.dart';
+import '../models/movie.dart';
+import '../models/movie_details.dart';
+import '../models/tv_progress.dart';
+import '../providers/tv_progress_provider.dart';
+import '../services/media_library_service.dart';
+import '../services/metadata_refresh_service.dart';
+import '../services/retry_helper.dart';
+import '../services/tmdb_service.dart';
+import 'episode_details_screen.dart';
+
+class TvDetailsScreen extends ConsumerStatefulWidget {
+  final Movie show;
+  final String heroTag;
+
+  const TvDetailsScreen({
+    super.key,
+    required this.show,
+    required this.heroTag,
+  });
+
+  @override
+  ConsumerState<TvDetailsScreen> createState() => _TvDetailsScreenState();
+}
+
+class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
+  final TmdbService _tmdbService = TmdbService();
+  final MediaLibraryService _libraryService = MediaLibraryService();
+  final MetadataRefreshService _cache = MetadataRefreshService.instance;
+
+  MovieDetails? details;
+  List<CastMember> cast = [];
+  List<Map<String, dynamic>> trailers = [];
+  List<Map<String, dynamic>> _seasonEpisodes = [];
+
+  bool _episodesLoading = false;
+  bool _initialLoadDone = false;
+  bool isRefreshing = false;
+  bool isLoadingTrailers = false;
+
+  String? errorMessage;
+  int _tvSelectedTab = 0;
+  int _tvAboutSection = 0;
+  int? _selectedSeason;
+  Future<MediaLibraryItem?>? _itemFuture;
+
+  String get _mediaType => 'tv';
+
+  String get _detailsKey {
+    return MetadataRefreshService.movieDetailsKey(
+      widget.show.id,
+      _mediaType,
+    );
+  }
+
+  String get _castKey {
+    return MetadataRefreshService.castKey(
+      widget.show.id,
+      _mediaType,
+    );
+  }
+
+  String get _trailersKey {
+    return MetadataRefreshService.trailersKey(widget.show.id);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    _itemFuture = _libraryService.getItem(widget.show.id);
+    _loadDetails();
+    _ensureTvProgressRecord();
+  }
+
+  Future<void> _ensureTvProgressRecord() async {
+    final notifier = ref.read(tvProgressProvider.notifier);
+
+    await notifier.ensureShow(
+      id: widget.show.id,
+      title: widget.show.title,
+      posterPath: widget.show.posterPath,
+      totalEpisodes: 0,
+      totalSeasons: 0,
+    );
+  }
+
+  Future<void> _loadDetails({
+    bool forceRefresh = false,
+  }) async {
+    final cachedDetails = _cache.read<MovieDetails>(_detailsKey);
+    final cachedCast = _cache.read<List<CastMember>>(_castKey);
+    final cachedTrailers =
+        _cache.read<List<Map<String, dynamic>>>(_trailersKey);
+
+    if (cachedDetails != null) {
+      if (!mounted) return;
+
+      setState(() {
+        details = cachedDetails;
+        cast = cachedCast ?? [];
+        trailers = cachedTrailers ?? [];
+        _initialLoadDone = true;
+        errorMessage = null;
+      });
+
+      _selectedSeason ??= 1;
+      _loadSeasonEpisodes(_selectedSeason!);
+      _loadTrailersInBackground();
+
+      if (!forceRefresh && _cache.isFresh(_detailsKey)) {
+        return;
+      }
+
+      await _refreshDetailsSilently();
+      return;
     }
 
-    int watchedUpToPreviousSeasons = 0;
-    for (var s = 1; s < selectedSeason; s++) {
-      final key = '${progress.id}:$s';
-      final count = _episodeCountCache[key] ?? 0;
-      watchedUpToPreviousSeasons += count;
+    if (mounted) {
+      setState(() {
+        _initialLoadDone = false;
+        errorMessage = null;
+      });
     }
 
-    final watchedInThisSeason =
-        progress.watchedEpisodes - watchedUpToPreviousSeasons;
+    await _refreshDetailsSilently(showInitialLoading: true);
+  }
 
-    if (watchedInThisSeason <= 0) return 0;
-    if (watchedInThisSeason >= episodeCount) return episodeCount;
-    return watchedInThisSeason;
+  Future<void> _refreshDetailsSilently({
+    bool showInitialLoading = false,
+  }) async {
+    if (isRefreshing) return;
+
+    isRefreshing = true;
+
+    if (showInitialLoading && mounted) {
+      setState(() {
+        _initialLoadDone = false;
+      });
+    }
+
+    try {
+      final results = await Future.wait([
+        retryCall(
+          () => _tmdbService.getMovieDetails(
+            widget.show.id,
+            _mediaType,
+          ),
+        ),
+        retryCall(
+          () => _tmdbService.getCast(
+            widget.show.id,
+            _mediaType,
+          ),
+        ),
+      ]);
+
+      final loadedDetails = results as MovieDetails;
+      final loadedCast = (results as List).cast<CastMember>();[1]
+
+      _cache.write<MovieDetails>(_detailsKey, loadedDetails);
+      _cache.write<List<CastMember>>(_castKey, loadedCast);
+
+      if (!mounted) return;
+
+      setState(() {
+        details = loadedDetails;
+        cast = loadedCast;
+        _initialLoadDone = true;
+        errorMessage = null;
+      });
+
+      _selectedSeason ??= 1;
+      _loadSeasonEpisodes(_selectedSeason!);
+      _loadTrailersInBackground();
+    } catch (error) {
+      debugPrint('TV Details Error: $error');
+
+      if (!mounted) return;
+
+      setState(() {
+        _initialLoadDone = true;
+        errorMessage = 'Failed to load show details.';
+      });
+    } finally {
+      isRefreshing = false;
+    }
+  }
+
+  Future<void> _loadTrailersInBackground({
+    bool forceRefresh = false,
+  }) async {
+    if (isLoadingTrailers) return;
+
+    final cachedTrailers =
+        _cache.read<List<Map<String, dynamic>>>(_trailersKey);
+
+    if (cachedTrailers != null &&
+        cachedTrailers.isNotEmpty &&
+        !forceRefresh &&
+        _cache.isFresh(_trailersKey)) {
+      if (mounted) {
+        setState(() {
+          trailers = cachedTrailers;
+        });
+      }
+      return;
+    }
+
+    await _loadTrailers(
+      forceRefresh: forceRefresh,
+      showLoading: false,
+    );
+  }
+
+  Future<void> _loadTrailers({
+    bool forceRefresh = false,
+    bool showLoading = true,
+  }) async {
+    if (isLoadingTrailers) return;
+
+    final cachedTrailers =
+        _cache.read<List<Map<String, dynamic>>>(_trailersKey);
+
+    if (!forceRefresh &&
+        cachedTrailers != null &&
+        cachedTrailers.isNotEmpty &&
+        _cache.isFresh(_trailersKey)) {
+      if (mounted) {
+        setState(() {
+          trailers = cachedTrailers;
+        });
+      }
+      return;
+    }
+
+    if (mounted && showLoading) {
+      setState(() {
+        isLoadingTrailers = true;
+      });
+    } else {
+      isLoadingTrailers = true;
+    }
+
+    try {
+      final videos = await retryCall(
+        () => _tmdbService.getVideos(widget.show.id, _mediaType),
+      );
+
+      final filteredTrailers = videos
+          .whereType<Map>()
+          .map((video) => Map<String, dynamic>.from(video))
+          .where((video) {
+            final site = video['site']?.toString().toLowerCase() ?? '';
+            final key = video['key']?.toString() ?? '';
+            final type = video['type']?.toString().toLowerCase() ?? '';
+
+            return site == 'youtube' &&
+                key.isNotEmpty &&
+                (type == 'trailer' || type == 'teaser');
+          })
+          .map((video) => <String, dynamic>{
+                ...video,
+                'yt_title': video['name'] ?? '',
+              })
+          .toList();
+
+      filteredTrailers.sort((a, b) {
+        final aDate = a['published_at']?.toString() ?? '';
+        final bDate = b['published_at']?.toString() ?? '';
+
+        if (aDate.isEmpty && bDate.isEmpty) return 0;
+        if (aDate.isEmpty) return 1;
+        if (bDate.isEmpty) return -1;
+        return bDate.compareTo(aDate);
+      });
+
+      _cache.write<List<Map<String, dynamic>>>(
+        _trailersKey,
+        filteredTrailers,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        trailers = filteredTrailers;
+        isLoadingTrailers = false;
+      });
+    } catch (error) {
+      debugPrint('Trailer Error: $error');
+
+      if (!mounted) return;
+
+      setState(() {
+        isLoadingTrailers = false;
+      });
+    }
+  }
+
+  Future<void> _openTrailer(Map<String, dynamic> trailer) async {
+    final key = trailer['key']?.toString() ?? '';
+    if (key.isEmpty) return;
+
+    final uri = Uri.parse('https://www.youtube.com/watch?v=$key');
+    final opened = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open trailer.')),
+      );
+    }
+  }
+
+  Future<void> _changeShowStatus(MediaStatus status) async {
+    final existing = await _libraryService.getItem(widget.show.id);
+
+    if (existing == null) {
+      await _libraryService.addMedia(widget.show, status);
+    } else if (existing.status == status) {
+      await _libraryService.removeMedia(widget.show.id);
+    } else {
+      await _libraryService.updateStatus(widget.show.id, status);
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _itemFuture = _libraryService.getItem(widget.show.id);
+    });
+  }
+
+  Future<void> _loadSeasonEpisodes(int seasonNumber) async {
+    if (_episodesLoading) return;
+
+    if (mounted) {
+      setState(() {
+        _episodesLoading = true;
+      });
+    }
+
+    try {
+      final episodes = await retryCall(
+        () => _tmdbService.getSeasonEpisodes(widget.show.id, seasonNumber),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _seasonEpisodes = episodes
+            .map((episode) => Map<String, dynamic>.from(episode))
+            .toList();
+        _episodesLoading = false;
+      });
+    } catch (error) {
+      debugPrint('Season Episodes Error: $error');
+
+      if (!mounted) return;
+
+      setState(() {
+        _seasonEpisodes = [];
+        _episodesLoading = false;
+      });
+    }
+  }
+
+  String? _posterUrlFor(String? path) {
+    final value = path?.trim() ?? '';
+    if (value.isEmpty) return null;
+
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+
+    return 'https://image.tmdb.org/t/p/w500$value';
+  }
+
+  String? _detailsPosterUrl(MovieDetails? show) {
+    final value = show?.posterUrl.trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  bool _isEpisodeReleased(Map<String, dynamic> episode) {
+    final value = episode['air_date']?.toString().trim() ?? '';
+    final airDate = DateTime.tryParse(value);
+
+    if (airDate == null) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final episodeDay = DateTime(airDate.year, airDate.month, airDate.day);
+
+    return !episodeDay.isAfter(today);
+  }
+
+  String _episodeKey(int seasonNumber, int episodeNumber) {
+    return '${widget.show.id}:s${seasonNumber}e$episodeNumber';
+  }
+
+  String _watchedKeysSignature(Set<String> watchedKeys) {
+    if (watchedKeys.isEmpty) {
+      return 'empty';
+    }
+
+    final keys = watchedKeys.toList();
+    keys.sort();
+    return keys.join('|');
+  }
+
+  Widget _buildShowStatusButtons() {
+    return FutureBuilder<MediaLibraryItem?>(
+      future: _itemFuture,
+      builder: (context, snapshot) {
+        final currentStatus = snapshot.data?.status;
+
+        Widget makeButton({
+          required String label,
+          required IconData icon,
+          required MediaStatus status,
+          required Color color,
+        }) {
+          return _PremiumStatusButton(
+            label: label,
+            icon: icon,
+            selected: currentStatus == status,
+            selectedColor: color,
+            onPressed: () => _changeShowStatus(status),
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(
+              child: makeButton(
+                label: 'Planned',
+                icon: Icons.bookmark_add_outlined,
+                status: MediaStatus.planning,
+                color: const Color(0xFF4C8BF5),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: makeButton(
+                label: 'Watched',
+                icon: Icons.check_circle_outline,
+                status: MediaStatus.watched,
+                color: const Color(0xFF2EAF62),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: makeButton(
+                label: 'Dropped',
+                icon: Icons.close_outlined,
+                status: MediaStatus.dropped,
+                color: const Color(0xFFB00020),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildShowAboutSections() {
+    return _SegmentSelector(
+      labels: const ['Overview', 'Cast', 'Trailers'],
+      selectedIndex: _tvAboutSection,
+      onSelected: (index) {
+        setState(() {
+          _tvAboutSection = index;
+        });
+
+        if (index == 2) {
+          _loadTrailers(showLoading: trailers.isEmpty);
+        }
+      },
+    );
+  }
+
+  Widget _buildShowOverview(MovieDetails show) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          show.overview.isEmpty ? 'No overview available.' : show.overview,
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
+            fontSize: 15,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 20),
+        _InfoLine(
+          label: 'Creator',
+          value: show.createdBy.isEmpty ? '-' : show.createdBy.join(', '),
+        ),
+        _InfoLine(label: 'Release Date', value: show.formattedReleaseDate),
+        _InfoLine(
+          label: 'Genre',
+          value: show.genres.isEmpty ? '-' : show.genres.join(', '),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOverviewSkeleton() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        _SkeletonLine(width: double.infinity),
+        SizedBox(height: 8),
+        _SkeletonLine(width: double.infinity),
+        SizedBox(height: 8),
+        _SkeletonLine(width: 260),
+        SizedBox(height: 24),
+        _SkeletonLine(width: 140),
+        SizedBox(height: 10),
+        _SkeletonLine(width: 120),
+        SizedBox(height: 10),
+        _SkeletonLine(width: 160),
+      ],
+    );
+  }
+
+  void _openActorDetails(CastMember actor) {
+    context.push(
+      '/discover/actor',
+      extra: {
+        'personId': actor.id,
+        'initialName': actor.name,
+        'initialProfilePath': actor.profilePath,
+      },
+    );
+  }
+
+  Widget _buildCast() {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (cast.isEmpty) {
+      return Text(
+        'Cast information unavailable.',
+        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 15),
+      );
+    }
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: cast.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 18,
+        mainAxisExtent: 172,
+      ),
+      itemBuilder: (context, index) {
+        final actor = cast[index];
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _openActorDetails(actor),
+            borderRadius: BorderRadius.circular(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 108,
+                    child: actor.profileUrl.isEmpty
+                        ? _personPlaceholder()
+                        : Image.network(
+                            actor.profileUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                _personPlaceholder(),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 32,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: Text(
+                      actor.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: scheme.onSurface,
+                        fontSize: 12,
+                        height: 1.2,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 1),
+                SizedBox(
+                  height: 14,
+                  child: Text(
+                    actor.character,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 10,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCastSkeleton() {
+    final scheme = Theme.of(context).colorScheme;
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: 6,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 18,
+        mainAxisExtent: 172,
+      ),
+      itemBuilder: (_, __) {
+        return Column(
+          children: [
+            Container(
+              height: 108,
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const SizedBox(
+              height: 32,
+              child: _SkeletonLine(width: double.infinity),
+            ),
+            const SizedBox(height: 1),
+            const SizedBox(
+              height: 14,
+              child: _SkeletonLine(width: double.infinity),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTrailers() {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (isLoadingTrailers && trailers.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 28),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (trailers.isEmpty) {
+      return Text(
+        'No official trailers available.',
+        style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 15),
+      );
+    }
+
+    return Column(
+      children: trailers.map<Widget>((trailer) {
+        final key = trailer['key']?.toString() ?? '';
+        final youtubeTitle = trailer['yt_title']?.toString() ?? '';
+        final tmdbTitle = trailer['name']?.toString() ?? '';
+        final title = youtubeTitle.trim().isNotEmpty
+            ? youtubeTitle
+            : tmdbTitle.trim().isNotEmpty
+                ? tmdbTitle
+                : 'Official trailer';
+
+        return Column(
+          children: [
+            InkWell(
+              onTap: () => _openTrailer(trailer),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 120,
+                      height: 68,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(9),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.network(
+                              'https://img.youtube.com/vi/$key/hqdefault.jpg',
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) {
+                                return Container(
+                                  color: scheme.surfaceContainerHighest,
+                                  child: Icon(
+                                    Icons.broken_image_outlined,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                );
+                              },
+                            ),
+                            Center(
+                              child: Container(
+                                width: 30,
+                                height: 30,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.72),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.play_arrow,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: scheme.onSurface,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Divider(
+              height: 1,
+              color: scheme.outline.withValues(alpha: 0.45),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildShowAboutSelectedSection(MovieDetails? show) {
+    switch (_tvAboutSection) {
+      case 1:
+        return details != null ? _buildCast() : _buildCastSkeleton();
+      case 2:
+        return _buildTrailers();
+      default:
+        return details != null
+            ? _buildShowOverview(show!)
+            : _buildOverviewSkeleton();
+    }
   }
 
   Widget _buildTvEpisodes(
     MovieDetails? show,
-    TvProgress? progressItem,
+    TvProgress progressItem,
     TvProgressNotifier notifier,
   ) {
     final scheme = Theme.of(context).colorScheme;
@@ -800,238 +1811,269 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     }
 
     final selectedSeason = _selectedSeason ?? 1;
-    final episodeCount = _seasonEpisodes.length;
+    final watchedKeys = _watchedKeysSignature(progressItem.watchedEpisodeKeys);
 
-    if (episodeCount > 0) {
-      final key = '${progressItem?.id ?? widget.show.id}:$selectedSeason';
-      _episodeCountCache[key] = episodeCount;
-    }
+    debugPrint('TV EPISODES KEY: $watchedKeys');
 
-    final watchedInSeason = _watchedInSelectedSeason(
-      progressItem,
-      selectedSeason,
-      episodeCount,
-    );
-    final isSeasonWatched =
-        episodeCount > 0 && watchedInSeason >= episodeCount;
+    final releasedEpisodes = _seasonEpisodes
+        .where(_isEpisodeReleased)
+        .toList(growable: false);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(5),
-          decoration: BoxDecoration(
-            color: scheme.surface.withValues(alpha: 0.75),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: scheme.outline.withValues(alpha: 0.22)),
-          ),
-          child: SizedBox(
-            height: 44,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: totalSeasons,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final seasonNumber = index + 1;
-                final isSelected = seasonNumber == selectedSeason;
+    final watchedInSeason = releasedEpisodes.where((episode) {
+      final episodeNumber = (episode['episode_number'] as int?) ?? 0;
 
-                return GestureDetector(
-                  onTap: () {
-                    if (isSelected) return;
-                    setState(() {
-                      _selectedSeason = seasonNumber;
-                    });
-                    _loadSeasonEpisodes(seasonNumber);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    constraints: const BoxConstraints(minWidth: 64),
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? Color.alphaBlend(
-                              scheme.primary.withValues(alpha: 0.22),
-                              scheme.surface,
-                            )
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(13),
-                      border: Border.all(
+      return episodeNumber > 0 &&
+          progressItem.watchedEpisodeKeys.contains(
+            _episodeKey(selectedSeason, episodeNumber),
+          );
+    }).length;
+
+    final seasonIsFullyWatched = releasedEpisodes.isNotEmpty &&
+        watchedInSeason == releasedEpisodes.length;
+
+    return KeyedSubtree(
+      key: ValueKey<String>(
+        'tv-${widget.show.id}-s$selectedSeason-$watchedKeys',
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: scheme.surface.withValues(alpha: 0.75),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: scheme.outline.withValues(alpha: 0.22),
+              ),
+            ),
+            child: SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: totalSeasons,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final seasonNumber = index + 1;
+                  final isSelected = seasonNumber == selectedSeason;
+
+                  return GestureDetector(
+                    onTap: () {
+                      if (isSelected) return;
+
+                      setState(() {
+                        _selectedSeason = seasonNumber;
+                      });
+
+                      _loadSeasonEpisodes(seasonNumber);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      constraints: const BoxConstraints(minWidth: 64),
+                      alignment: Alignment.center,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
                         color: isSelected
-                            ? scheme.primary.withValues(alpha: 0.75)
+                            ? Color.alphaBlend(
+                                scheme.primary.withValues(alpha: 0.22),
+                                scheme.surface,
+                              )
                             : Colors.transparent,
-                        width: isSelected ? 1.2 : 1,
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(
+                          color: isSelected
+                              ? scheme.primary.withValues(alpha: 0.75)
+                              : Colors.transparent,
+                          width: isSelected ? 1.2 : 1,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: scheme.primary.withValues(alpha: 0.14),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ]
+                            : null,
                       ),
-                      boxShadow: isSelected
-                          ? [
-                              BoxShadow(
-                                color: scheme.primary.withValues(alpha: 0.14),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ]
-                          : null,
+                      child: Text(
+                        'S${seasonNumber.toString().padLeft(2, '0')}',
+                        style: TextStyle(
+                          color: isSelected
+                              ? scheme.onSurface
+                              : scheme.onSurfaceVariant,
+                          fontSize: 13,
+                          fontWeight: isSelected
+                              ? FontWeight.w800
+                              : FontWeight.w600,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
                     ),
-                    child: Text(
-                      'S${seasonNumber.toString().padLeft(2, '0')}',
-                      style: TextStyle(
-                        color: isSelected
-                            ? scheme.onSurface
-                            : scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        fontWeight: isSelected
-                            ? FontWeight.w800
-                            : FontWeight.w600,
-                        letterSpacing: 0.4,
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: _SeasonProgressButton(
+              selected: seasonIsFullyWatched,
+              onPressed: () async {
+                await notifier.toggleSeasonWatched(
+                  widget.show.id,
+                  selectedSeason,
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 14),
+          _SeasonProgressMeter(
+            watchedEpisodes: watchedInSeason,
+            totalEpisodes: releasedEpisodes.length,
+          ),
+          const SizedBox(height: 20),
+          if (_episodesLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 28),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_seasonEpisodes.isEmpty)
+            Text(
+              'No episode information available for this season.',
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
+                fontSize: 15,
+              ),
+            )
+          else
+            ListView.separated(
+              key: PageStorageKey<String>(
+                'episodes-${widget.show.id}-s$selectedSeason-$watchedKeys',
+              ),
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _seasonEpisodes.length,
+              separatorBuilder: (_, __) {
+                return Divider(
+                  height: 1,
+                  color: scheme.outline.withValues(alpha: 0.24),
+                );
+              },
+              itemBuilder: (context, index) {
+                final episode = _seasonEpisodes[index];
+                final episodeNumber =
+                    (episode['episode_number'] as int?) ?? (index + 1);
+                final title = (episode['name'] as String?)?.trim() ??
+                    'Episode $episodeNumber';
+                final stillPath = episode['still_path'] as String?;
+                final isReleased = _isEpisodeReleased(episode);
+                final episodeKey =
+                    _episodeKey(selectedSeason, episodeNumber);
+
+                final isWatched =
+                    progressItem.watchedEpisodeKeys.contains(episodeKey);
+
+                debugPrint('EPISODE KEY: $episodeKey  |  WATCHED: $isWatched');
+
+                return InkWell(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => EpisodeDetailsScreen(
+                          show: widget.show,
+                          seasonNumber: selectedSeason,
+                          episodeNumber: episodeNumber,
+                          episode: Map<String, dynamic>.from(episode),
+                        ),
                       ),
+                    );
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 2,
+                    ),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(11),
+                          child: SizedBox(
+                            width: 104,
+                            height: 58,
+                            child: stillPath != null && stillPath.isNotEmpty
+                                ? Image.network(
+                                    'https://image.tmdb.org/t/p/w185$stillPath',
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) {
+                                      return _episodeImagePlaceholder(scheme);
+                                    },
+                                  )
+                                : _episodeImagePlaceholder(scheme),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: 34,
+                          child: Text(
+                            'E${episodeNumber.toString().padLeft(2, '0')}',
+                            style: TextStyle(
+                              color: !isReleased
+                                  ? scheme.onSurfaceVariant
+                                      .withValues(alpha: 0.48)
+                                  : isWatched
+                                      ? const Color(0xFF2EAF62)
+                                      : scheme.onSurfaceVariant,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            title.isEmpty ? 'Episode $episodeNumber' : title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: !isReleased
+                                  ? scheme.onSurfaceVariant
+                                      .withValues(alpha: 0.48)
+                                  : isWatched
+                                      ? scheme.onSurface
+                                          .withValues(alpha: 0.82)
+                                      : scheme.onSurface,
+                              fontSize: 14,
+                              height: 1.25,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        _EpisodeWatchedButton(
+                          selected: isWatched,
+                          enabled: isReleased,
+                          onPressed: !isReleased
+                              ? null
+                              : () async {
+                                  await notifier.toggleEpisodeProgressAt(
+                                    widget.show.id,
+                                    selectedSeason,
+                                    episodeNumber,
+                                  );
+                                },
+                        ),
+                      ],
                     ),
                   ),
                 );
               },
             ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Center(
-          child: _SeasonProgressButton(
-            selected: isSeasonWatched,
-            onPressed: () async {
-              await _ensureShowInProgress();
-              await notifier.toggleSeasonWatched(
-                widget.show.id,
-                selectedSeason,
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 14),
-        _SeasonProgressMeter(
-          watchedEpisodes: watchedInSeason,
-          totalEpisodes: episodeCount,
-        ),
-        const SizedBox(height: 20),
-        if (_episodesLoading)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 28),
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (_seasonEpisodes.isEmpty)
-          Text(
-            'No episode information available for this season.',
-            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 15),
-          )
-        else
-          ListView.separated(
-            key: PageStorageKey<String>(
-              'episodes_list_${widget.show.id}_s$selectedSeason',
-            ),
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _seasonEpisodes.length,
-            separatorBuilder: (_, __) {
-              return Divider(
-                height: 1,
-                color: scheme.outline.withValues(alpha: 0.24),
-              );
-            },
-            itemBuilder: (context, index) {
-              final episode = _seasonEpisodes[index];
-              final episodeNumber =
-                  (episode['episode_number'] as int?) ?? (index + 1);
-              final title = (episode['name'] as String?)?.trim() ??
-                  'Episode $episodeNumber';
-              final stillPath = episode['still_path'] as String?;
-
-              final episodeKey = '${widget.show.id}:s${selectedSeason}e$episodeNumber';
-
-final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false;
-
-              return InkWell(
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => EpisodeDetailsScreen(
-                        show: widget.show,
-                        seasonNumber: selectedSeason,
-                        episodeNumber: episodeNumber,
-                        episode: Map<String, dynamic>.from(episode),
-                      ),
-                    ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(11),
-                        child: SizedBox(
-                          width: 104,
-                          height: 58,
-                          child: stillPath != null && stillPath.isNotEmpty
-                              ? Image.network(
-                                  'https://image.tmdb.org/t/p/w185$stillPath',
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) {
-                                    return _episodeImagePlaceholder(scheme);
-                                  },
-                                )
-                              : _episodeImagePlaceholder(scheme),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      SizedBox(
-                        width: 34,
-                        child: Text(
-                          'E${episodeNumber.toString().padLeft(2, '0')}',
-                          style: TextStyle(
-                            color: isWatched
-                                ? const Color(0xFF2EAF62)
-                                : scheme.onSurfaceVariant,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          title.isEmpty ? 'Episode $episodeNumber' : title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: isWatched
-                                ? scheme.onSurface.withValues(alpha: 0.82)
-                                : scheme.onSurface,
-                            fontSize: 14,
-                            height: 1.25,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      _EpisodeWatchedButton(
-                        selected: isWatched,
-                        onPressed: () async {
-                          await _ensureShowInProgress();
-                          await notifier.toggleEpisodeWatchedAt(
-                            widget.show.id,
-                            selectedSeason,
-                            episodeNumber,
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1040,27 +2082,6 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
       color: scheme.surfaceContainerHighest,
       alignment: Alignment.center,
       child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
-    );
-  }
-
-  Future<void> _ensureShowInProgress() async {
-    final notifier = ref.read(tvProgressProvider.notifier);
-
-    if (notifier.getShowById(widget.show.id) != null) {
-      return;
-    }
-
-    await notifier.addShow(
-      TvProgress(
-        id: widget.show.id,
-        title: widget.show.title,
-        posterPath: widget.show.posterPath,
-        currentSeason: 1,
-        currentEpisode: 1,
-        watchedEpisodes: 0,
-        totalEpisodes: details?.totalEpisodes ?? 0,
-        totalSeasons: details?.totalSeasons ?? 0,
-      ),
     );
   }
 
@@ -1135,23 +2156,48 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
 
   Widget _buildTvPage() {
     final scheme = Theme.of(context).colorScheme;
+
+    // This watch makes the entire page rebuild whenever tvProgress changes.
     final tvProgress = ref.watch(tvProgressProvider);
     final notifier = ref.read(tvProgressProvider.notifier);
-    final progressItem = tvProgress
-        .where((progress) => progress.id == widget.show.id)
-        .firstOrNull;
+
+    TvProgress? progressItem;
+    for (final item in tvProgress) {
+      if (item.id == widget.show.id) {
+        progressItem = item;
+        break;
+      }
+    }
+
+    // If no progress exists yet, use a dummy empty one; ensureShow will create it.
+    if (progressItem == null) {
+      progressItem = TvProgress(
+        id: widget.show.id,
+        title: widget.show.title,
+        posterPath: widget.show.posterPath,
+        currentSeason: 1,
+        currentEpisode: 1,
+        watchedEpisodes: 0,
+        totalEpisodes: 0,
+        totalSeasons: 0,
+        watchedEpisodeKeys: const <String>{},
+      );
+    }
+
     final show = details;
 
     return Scaffold(
       body: RefreshIndicator(
         onRefresh: () async {
           final currentSeason = _selectedSeason ?? 1;
+
           await _refreshDetailsSilently();
 
           if (_selectedSeason != currentSeason) {
             setState(() {
               _selectedSeason = currentSeason;
             });
+
             _loadSeasonEpisodes(currentSeason);
           }
         },
@@ -1200,7 +2246,7 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 180),
                       child: KeyedSubtree(
-                        key: ValueKey(_tvSelectedTab),
+                        key: ValueKey<int>(_tvSelectedTab),
                         child: _tvSelectedTab == 0
                             ? Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1210,14 +2256,18 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
                                   AnimatedSwitcher(
                                     duration: const Duration(milliseconds: 180),
                                     child: KeyedSubtree(
-                                      key: ValueKey(_tvAboutSection),
+                                      key: ValueKey<int>(_tvAboutSection),
                                       child:
                                           _buildShowAboutSelectedSection(show),
                                     ),
                                   ),
                                 ],
                               )
-                            : _buildTvEpisodes(show, progressItem, notifier),
+                            : _buildTvEpisodes(
+                                show,
+                                progressItem,
+                                notifier,
+                              ),
                       ),
                     ),
                   ],
@@ -1232,6 +2282,7 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
 
   Widget _posterPlaceholder() {
     final scheme = Theme.of(context).colorScheme;
+
     return Container(
       width: 240,
       height: 360,
@@ -1246,6 +2297,7 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
 
   Widget _personPlaceholder() {
     final scheme = Theme.of(context).colorScheme;
+
     return Container(
       color: scheme.surfaceContainerHighest,
       child: Icon(Icons.person, color: scheme.onSurfaceVariant),
@@ -1294,7 +2346,9 @@ final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false
 
     return _buildTvPage();
   }
-}// -------------------------- Helper Widgets --------------------------
+}
+
+// -------------------------- Helper Widgets --------------------------
 
 class _SegmentSelector extends StatelessWidget {
   final List<String> labels;
@@ -1327,8 +2381,10 @@ class _SegmentSelector extends StatelessWidget {
               onTap: () => onSelected(index),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 8,
+                ),
                 decoration: BoxDecoration(
                   color: selected ? scheme.primary : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
@@ -1354,7 +2410,9 @@ class _SegmentSelector extends StatelessWidget {
 class _SkeletonLine extends StatelessWidget {
   final double width;
 
-  const _SkeletonLine({required this.width});
+  const _SkeletonLine({
+    required this.width,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1396,20 +2454,25 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     final surfaceColor = widget.selected
         ? Color.alphaBlend(
             widget.selectedColor.withValues(alpha: 0.20),
             scheme.surface,
           )
         : scheme.surface.withValues(alpha: 0.74);
+
     final borderColor = widget.selected
         ? widget.selectedColor.withValues(alpha: 0.85)
         : scheme.outline.withValues(alpha: 0.20);
+
     final iconSurface = widget.selected
         ? widget.selectedColor.withValues(alpha: 0.22)
         : scheme.surfaceContainerHighest.withValues(alpha: 0.62);
+
     final iconColor =
         widget.selected ? widget.selectedColor : scheme.onSurfaceVariant;
+
     final labelColor =
         widget.selected ? scheme.onSurface : scheme.onSurfaceVariant;
 
@@ -1505,7 +2568,11 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
                                 ]
                               : null,
                         ),
-                        child: Icon(widget.icon, size: 22, color: iconColor),
+                        child: Icon(
+                          widget.icon,
+                          size: 22,
+                          color: iconColor,
+                        ),
                       ),
                       const SizedBox(height: 7),
                       AnimatedDefaultTextStyle(
@@ -1637,22 +2704,22 @@ class _SeasonProgressMeter extends StatelessWidget {
     const watchedColor = Color(0xFF2EAF62);
 
     final safeTotal = totalEpisodes < 0 ? 0 : totalEpisodes;
-    final safeWatched = safeTotal == 0
-        ? 0
-        : watchedEpisodes.clamp(0, safeTotal);
+    final safeWatched =
+        safeTotal == 0 ? 0 : watchedEpisodes.clamp(0, safeTotal);
+
     final progress = safeTotal == 0 ? 0.0 : safeWatched / safeTotal;
     final complete = safeTotal > 0 && safeWatched >= safeTotal;
 
     final label = safeTotal == 0
-        ? 'Loading season progress'
+        ? 'No released episodes'
         : complete
             ? 'Season complete'
             : '$safeWatched / $safeTotal watched';
 
     return Semantics(
       label: safeTotal == 0
-          ? 'Loading season progress'
-          : '$safeWatched of $safeTotal episodes watched',
+          ? 'No released episodes'
+          : '$safeWatched of $safeTotal released episodes watched',
       value: safeTotal == 0 ? null : '${(progress * 100).round()} percent',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1739,13 +2806,17 @@ class _SeasonProgressMeter extends StatelessWidget {
       ),
     );
   }
-}class _EpisodeWatchedButton extends StatefulWidget {
+}
+
+class _EpisodeWatchedButton extends StatefulWidget {
   final bool selected;
-  final VoidCallback onPressed;
+  final bool enabled;
+  final VoidCallback? onPressed;
 
   const _EpisodeWatchedButton({
     required this.selected,
-    required this.onPressed,
+    required this.enabled,
+    this.onPressed,
   });
 
   @override
@@ -1760,32 +2831,50 @@ class _EpisodeWatchedButtonState extends State<_EpisodeWatchedButton> {
     final scheme = Theme.of(context).colorScheme;
     const watchedColor = Color(0xFF2EAF62);
 
+    final effectiveColor = widget.enabled
+        ? (widget.selected ? watchedColor : scheme.onSurfaceVariant)
+        : scheme.onSurfaceVariant.withValues(alpha: 0.35);
+
+    final iconSurface = widget.enabled
+        ? (widget.selected
+            ? watchedColor.withValues(alpha: 0.18)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.5))
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.25);
+
+    final borderColor = widget.enabled
+        ? (widget.selected
+            ? watchedColor.withValues(alpha: 0.86)
+            : scheme.outline.withValues(alpha: 0.25))
+        : scheme.outline.withValues(alpha: 0.12);
+
     return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapCancel: () => setState(() => _pressed = false),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onPressed();
-      },
+      onTapDown: widget.enabled
+          ? (_) => setState(() => _pressed = true)
+          : null,
+      onTapCancel: widget.enabled
+          ? () => setState(() => _pressed = false)
+          : null,
+      onTapUp: widget.enabled
+          ? (_) {
+              setState(() => _pressed = false);
+              widget.onPressed?.call();
+            }
+          : null,
       child: AnimatedScale(
-        scale: _pressed ? 0.88 : 1,
+        scale: widget.enabled && _pressed ? 0.88 : 1,
         duration: const Duration(milliseconds: 110),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: widget.selected
-                ? watchedColor.withValues(alpha: 0.18)
-                : scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+            color: iconSurface,
             shape: BoxShape.circle,
             border: Border.all(
-              color: widget.selected
-                  ? watchedColor.withValues(alpha: 0.86)
-                  : scheme.outline.withValues(alpha: 0.25),
-              width: widget.selected ? 1.4 : 1,
+              color: borderColor,
+              width: widget.selected && widget.enabled ? 1.4 : 1,
             ),
-            boxShadow: widget.selected
+            boxShadow: widget.selected && widget.enabled
                 ? [
                     BoxShadow(
                       color: watchedColor.withValues(alpha: 0.16),
@@ -1795,11 +2884,13 @@ class _EpisodeWatchedButtonState extends State<_EpisodeWatchedButton> {
                 : null,
           ),
           child: Icon(
-            widget.selected
-                ? Icons.check_rounded
+            widget.enabled
+                ? (widget.selected
+                    ? Icons.check_rounded
+                    : Icons.check_circle_outline_rounded)
                 : Icons.check_circle_outline_rounded,
             size: 21,
-            color: widget.selected ? watchedColor : scheme.onSurfaceVariant,
+            color: effectiveColor,
           ),
         ),
       ),

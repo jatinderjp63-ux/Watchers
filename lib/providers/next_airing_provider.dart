@@ -39,11 +39,17 @@ final nextAiringProvider =
     try {
       // Airing must work even before the user has created TV progress
       // by opening Episodes or marking an episode.
-      final snapshot = await progressNotifier.getSnapshotForShow(
-        id: item.id,
-        title: item.title,
-        posterPath: item.posterPath,
-      );
+      TvProgressSnapshot? snapshot;
+      try {
+        snapshot = await progressNotifier.getSnapshotForShow(
+          id: item.id,
+          title: item.title,
+          posterPath: item.posterPath,
+        ).timeout(const Duration(seconds: 3));
+      } catch (_) {
+        // Skip this show if snapshot takes too long.
+        continue;
+      }
 
       if (snapshot.airingEpisodes.isEmpty) {
         continue;
@@ -77,8 +83,8 @@ final nextAiringProvider =
           episodeNumber: episode.episodeNumber,
           episodeName: '',
           isWatched: snapshot.isEpisodeWatched(
-  '${episode.tvId}:s${episode.seasonNumber}e${episode.episodeNumber}',
-),
+            '${episode.tvId}:s${episode.seasonNumber}e${episode.episodeNumber}',
+          ),
         ),
       );
     } catch (_) {

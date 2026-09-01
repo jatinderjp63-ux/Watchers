@@ -9,11 +9,15 @@ class TvProgress {
   final int totalSeasons;
   final DateTime? lastWatchedAt;
 
-  /// Persisted watched episode identifiers in `season:episode` form,
-  /// such as `1:1`, `1:2`, or `4:1`.
+  /// Supports both formats:
   ///
-  /// Existing saved progress with only `watchedEpisodes` remains readable.
-  /// The provider migrates legacy counts to keys when it has TMDB episode data.
+  /// Current format:
+  /// `tvId:s<season>e<episode>`
+  /// Example: `108978:s1e7`
+  ///
+  /// Legacy format:
+  /// `<season>:<episode>`
+  /// Example: `1:7`
   final Set<String> watchedEpisodeKeys;
 
   TvProgress({
@@ -32,13 +36,15 @@ class TvProgress {
         );
 
   bool get isFinished {
-    if (totalEpisodes <= 0) return false;
-
-    if (watchedEpisodeKeys.isNotEmpty) {
-      return watchedEpisodeKeys.length >= totalEpisodes;
+    if (totalEpisodes <= 0) {
+      return false;
     }
 
-    return watchedEpisodes >= totalEpisodes;
+    final completed = watchedEpisodeKeys.isNotEmpty
+        ? watchedEpisodeKeys.length
+        : watchedEpisodes;
+
+    return completed >= totalEpisodes;
   }
 
   bool get hasStarted {
@@ -53,14 +59,18 @@ class TvProgress {
   }
 
   String get nextEpisodeLabel {
-    if (isFinished) return 'Completed';
+    if (isFinished) {
+      return 'Completed';
+    }
 
     return 'S${currentSeason.toString().padLeft(2, '0')} '
         'E${currentEpisode.toString().padLeft(2, '0')}';
   }
 
   double get progress {
-    if (totalEpisodes <= 0) return 0.0;
+    if (totalEpisodes <= 0) {
+      return 0.0;
+    }
 
     final completed = watchedEpisodeKeys.isNotEmpty
         ? watchedEpisodeKeys.length
@@ -107,7 +117,7 @@ class TvProgress {
     final watchedKeys = rawKeys is List
         ? rawKeys
             .map((value) => value.toString().trim())
-            .where((value) => _isEpisodeKey(value))
+            .where(_isEpisodeKey)
             .toSet()
         : <String>{};
 
@@ -138,6 +148,8 @@ class TvProgress {
   }
 
   Map<String, dynamic> toJson() {
+    final keys = watchedEpisodeKeys.toList()..sort();
+
     return {
       'id': id,
       'title': title,
@@ -147,25 +159,25 @@ class TvProgress {
       'watchedEpisodes': watchedEpisodes,
       'totalEpisodes': totalEpisodes,
       'totalSeasons': totalSeasons,
-      'watchedEpisodeKeys': watchedEpisodeKeys.toList()..sort(),
+      'watchedEpisodeKeys': keys,
       if (lastWatchedAt != null)
         'lastWatchedAt': lastWatchedAt!.toIso8601String(),
     };
   }
 
   static bool _isEpisodeKey(String value) {
-    final parts = value.split(':');
-
-    if (parts.length != 2) {
+    if (value.isEmpty) {
       return false;
     }
 
-    final season = int.tryParse(parts[0]);
-    final episode = int.tryParse(parts[1]);
+    // Current provider format, for example:
+    // 108978:s1e7
+    if (RegExp(r'^\d+:s\d+e\d+$').hasMatch(value)) {
+      return true;
+    }
 
-    return season != null &&
-        episode != null &&
-        season > 0 &&
-        episode > 0;
+    // Legacy format, for example:
+    // 1:7
+    return RegExp(r'^\d+:\d+$').hasMatch(value);
   }
 }

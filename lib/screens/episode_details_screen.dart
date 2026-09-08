@@ -12,7 +12,7 @@ class EpisodeDetailsScreen extends ConsumerStatefulWidget {
   final Movie show;
   final int seasonNumber;
   final int episodeNumber;
-  final Map<String, dynamic> episode;
+  final Map episode;
 
   const EpisodeDetailsScreen({
     super.key,
@@ -23,21 +23,19 @@ class EpisodeDetailsScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<EpisodeDetailsScreen> createState() =>
-      _EpisodeDetailsScreenState();
+  ConsumerState createState() => _EpisodeDetailsScreenState();
 }
 
-class _EpisodeDetailsScreenState
-    extends ConsumerState<EpisodeDetailsScreen> {
+class _EpisodeDetailsScreenState extends ConsumerState<EpisodeDetailsScreen> {
   final TmdbService _tmdbService = TmdbService();
 
-  late Map<String, dynamic> _episodeData;
+  late Map _episodeData;
   bool _detailsLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _episodeData = Map<String, dynamic>.from(widget.episode);
+    _episodeData = Map.from(widget.episode);
     _loadFullEpisodeDetails();
   }
 
@@ -89,10 +87,15 @@ class _EpisodeDetailsScreenState
 
   String? get _stillUrl {
     final path = _episodeData['still_path']?.toString().trim() ?? '';
-    if (path.isEmpty) return null;
+
+    if (path.isEmpty) {
+      return null;
+    }
+
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return path;
     }
+
     return 'https://image.tmdb.org/t/p/w780$path';
   }
 
@@ -104,8 +107,8 @@ class _EpisodeDetailsScreenState
 
   String get _formattedRuntime {
     final rawRuntime = _episodeData['runtime'];
-    int? runtime;
 
+    int? runtime;
     if (rawRuntime is int) {
       runtime = rawRuntime;
     } else if (rawRuntime is num) {
@@ -114,16 +117,24 @@ class _EpisodeDetailsScreenState
       runtime = int.tryParse(rawRuntime?.toString() ?? '');
     }
 
-    if (runtime == null || runtime <= 0) return '-';
+    if (runtime == null || runtime <= 0) {
+      return '-';
+    }
+
     return '$runtime min';
   }
 
   String get _formattedDate {
     final rawDate = _episodeData['air_date']?.toString().trim() ?? '';
-    if (rawDate.isEmpty) return '-';
+
+    if (rawDate.isEmpty) {
+      return '-';
+    }
 
     final date = DateTime.tryParse(rawDate);
-    if (date == null) return rawDate;
+    if (date == null) {
+      return rawDate;
+    }
 
     const months = [
       'January',
@@ -145,7 +156,10 @@ class _EpisodeDetailsScreenState
 
   String get _formattedDirector {
     final rawCrew = _episodeData['crew'];
-    if (rawCrew is! List) return '-';
+
+    if (rawCrew is! List) {
+      return '-';
+    }
 
     final directors = rawCrew
         .whereType<Map>()
@@ -161,14 +175,12 @@ class _EpisodeDetailsScreenState
     return directors.isEmpty ? '-' : directors.join(', ');
   }
 
-  String _episodeKey() {
-    return '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
-  }
-
   Future<void> _ensureShowInProgress() async {
     final notifier = ref.read(tvProgressProvider.notifier);
 
-    if (notifier.getShowById(widget.show.id) != null) return;
+    if (notifier.getShowById(widget.show.id) != null) {
+      return;
+    }
 
     await notifier.addShow(
       TvProgress(
@@ -185,25 +197,68 @@ class _EpisodeDetailsScreenState
   }
 
   Future<void> _toggleWatched() async {
+    debugPrint('===== TOGGLE WATCHED START =====');
+    
     await _ensureShowInProgress();
 
-    await ref.read(tvProgressProvider.notifier).toggleEpisodeProgressAt(
-          widget.show.id,
-          widget.seasonNumber,
-          widget.episodeNumber,
-        );
-  }
-
-  bool _isEpisodeReleased() {
-    final rawDate = _episodeData['air_date']?.toString().trim() ?? '';
-    final airDate = DateTime.tryParse(rawDate);
-    if (airDate == null) return false;
-
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final episodeDay = DateTime(airDate.year, airDate.month, airDate.day);
-
-    return !episodeDay.isAfter(today);
+    final notifier = ref.read(tvProgressProvider.notifier);
+    
+    // Check current state
+    final progressItems = ref.read(tvProgressProvider);
+    debugPrint('Progress items count: ${progressItems.length}');
+    
+    final progress = progressItems.where((item) => item.id == widget.show.id).firstOrNull;
+    debugPrint('Progress found: ${progress != null}');
+    
+    if (progress == null) {
+      debugPrint('ERROR: No progress found for show ${widget.show.id}');
+      return;
+    }
+    
+    final episodeKey = '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
+    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(episodeKey);
+    
+    debugPrint('Episode key: $episodeKey');
+    debugPrint('Currently watched: $isCurrentlyWatched');
+    debugPrint('Current watchedEpisodeKeys: ${progress.watchedEpisodeKeys}');
+    
+    if (isCurrentlyWatched) {
+      // Unmark this episode
+      final newKeys = {...progress.watchedEpisodeKeys};
+      newKeys.remove(episodeKey);
+      
+      debugPrint('Removing key, new keys: $newKeys');
+      
+      final updated = progress.copyWith(
+        watchedEpisodeKeys: newKeys,
+        watchedEpisodes: newKeys.length,
+      );
+      
+      debugPrint('Calling updateShow...');
+      await notifier.updateShow(updated);
+      debugPrint('updateShow completed');
+    } else {
+      // Mark this episode
+      final newKeys = {...progress.watchedEpisodeKeys};
+      newKeys.add(episodeKey);
+      
+      debugPrint('Adding key, new keys: $newKeys');
+      
+      final updated = progress.copyWith(
+        watchedEpisodeKeys: newKeys,
+        watchedEpisodes: newKeys.length,
+      );
+      
+      debugPrint('Calling updateShow...');
+      await notifier.updateShow(updated);
+      debugPrint('updateShow completed');
+    }
+    
+    // Read state after update
+    final afterUpdate = ref.read(tvProgressProvider);
+    final afterProgress = afterUpdate.where((item) => item.id == widget.show.id).firstOrNull;
+    debugPrint('After update - watchedEpisodeKeys: ${afterProgress?.watchedEpisodeKeys}');
+    debugPrint('===== TOGGLE WATCHED END =====');
   }
 
   Widget _buildStillImage(ColorScheme scheme) {
@@ -245,19 +300,24 @@ class _EpisodeDetailsScreenState
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('===== BUILD START =====');
+    
     final scheme = Theme.of(context).colorScheme;
+    
+    // Watch provider and get current watched state
     final progressItems = ref.watch(tvProgressProvider);
-    TvProgress? progress;
-
-    for (final item in progressItems) {
-      if (item.id == widget.show.id) {
-        progress = item;
-        break;
-      }
-    }
-
-    final watched = progress?.watchedEpisodeKeys.contains(_episodeKey()) ?? false;
-    final released = _isEpisodeReleased();
+    debugPrint('Build - progress items count: ${progressItems.length}');
+    
+    final progress = progressItems.where((item) => item.id == widget.show.id).firstOrNull;
+    debugPrint('Build - progress found: ${progress != null}');
+    
+    final episodeKey = '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
+    final isWatched = progress?.watchedEpisodeKeys.contains(episodeKey) ?? false;
+    
+    debugPrint('Build - episode key: $episodeKey');
+    debugPrint('Build - is watched: $isWatched');
+    debugPrint('Build - watchedEpisodeKeys: ${progress?.watchedEpisodeKeys}');
+    debugPrint('===== BUILD END =====');
 
     return Scaffold(
       body: CustomScrollView(
@@ -321,9 +381,8 @@ class _EpisodeDetailsScreenState
                   ),
                   const SizedBox(height: 20),
                   _EpisodeProgressButton(
-                    selected: watched,
-                    enabled: released,
-                    onPressed: released ? _toggleWatched : null,
+                    selected: isWatched,
+                    onPressed: _toggleWatched,
                   ),
                   const SizedBox(height: 28),
                   Divider(
@@ -402,13 +461,11 @@ class _EpisodeDetailsScreenState
 
 class _EpisodeProgressButton extends StatefulWidget {
   final bool selected;
-  final bool enabled;
-  final VoidCallback? onPressed;
+  final VoidCallback onPressed;
 
   const _EpisodeProgressButton({
     required this.selected,
-    required this.enabled,
-    this.onPressed,
+    required this.onPressed,
   });
 
   @override
@@ -423,51 +480,50 @@ class _EpisodeProgressButtonState extends State<_EpisodeProgressButton> {
     final scheme = Theme.of(context).colorScheme;
     const watchedColor = Color(0xFF2EAF62);
 
-    final color = widget.enabled
-        ? (widget.selected ? watchedColor : scheme.onSurfaceVariant)
-        : scheme.onSurfaceVariant.withValues(alpha: 0.35);
-
     return Semantics(
-      button: widget.enabled,
+      button: true,
       selected: widget.selected,
       label: widget.selected ? 'Watched' : 'Mark Watched',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTapDown: widget.enabled
-            ? (_) => setState(() => _pressed = true)
-            : null,
-        onTapCancel: widget.enabled
-            ? () => setState(() => _pressed = false)
-            : null,
-        onTapUp: widget.enabled
-            ? (_) {
-                setState(() => _pressed = false);
-                widget.onPressed?.call();
-              }
-            : null,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTapUp: (_) {
+          setState(() => _pressed = false);
+          widget.onPressed();
+        },
         child: AnimatedScale(
-          scale: widget.enabled && _pressed ? 0.975 : 1,
+          scale: _pressed ? 0.975 : 1,
           duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOut,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
             height: 54,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: widget.enabled && widget.selected
+              color: widget.selected
                   ? Color.alphaBlend(
                       watchedColor.withValues(alpha: 0.20),
                       scheme.surface,
                     )
-                  : scheme.surfaceContainerHighest.withValues(
-                      alpha: widget.enabled ? 0.58 : 0.25,
-                    ),
+                  : scheme.surfaceContainerHighest.withValues(alpha: 0.58),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: widget.enabled && widget.selected
+                color: widget.selected
                     ? watchedColor.withValues(alpha: 0.84)
-                    : scheme.outline.withValues(alpha: 0.16),
-                width: widget.enabled && widget.selected ? 1.35 : 1,
+                    : scheme.outline.withValues(alpha: 0.24),
+                width: widget.selected ? 1.35 : 1,
               ),
+              boxShadow: widget.selected
+                  ? [
+                      BoxShadow(
+                        color: watchedColor.withValues(alpha: 0.16),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ]
+                  : null,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -476,14 +532,16 @@ class _EpisodeProgressButtonState extends State<_EpisodeProgressButton> {
                   widget.selected
                       ? Icons.check_circle_rounded
                       : Icons.check_circle_outline_rounded,
-                  color: color,
+                  color: widget.selected ? watchedColor : scheme.onSurfaceVariant,
                   size: 21,
                 ),
                 const SizedBox(width: 9),
                 Text(
                   widget.selected ? 'Watched' : 'Mark Watched',
                   style: TextStyle(
-                    color: color,
+                    color: widget.selected
+                        ? scheme.onSurface
+                        : scheme.onSurfaceVariant,
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
                   ),

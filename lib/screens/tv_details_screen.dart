@@ -54,8 +54,6 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   int? _selectedSeason;
   Future<MediaLibraryItem?>? _itemFuture;
 
-  final Map<String, int> _episodeCountCache = {};
-
   String get _mediaType => 'tv';
 
   String get _detailsKey {
@@ -754,38 +752,6 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     }
   }
 
-  int _watchedInSelectedSeason(
-    TvProgress? progress,
-    int selectedSeason,
-    int episodeCount,
-  ) {
-    if (progress == null || episodeCount == 0 || progress.totalSeasons == 0) {
-      return 0;
-    }
-
-    if (progress.currentSeason > selectedSeason) {
-      return episodeCount;
-    }
-
-    if (progress.currentSeason < selectedSeason) {
-      return 0;
-    }
-
-    int watchedUpToPreviousSeasons = 0;
-    for (var s = 1; s < selectedSeason; s++) {
-      final key = '${progress.id}:$s';
-      final count = _episodeCountCache[key] ?? 0;
-      watchedUpToPreviousSeasons += count;
-    }
-
-    final watchedInThisSeason =
-        progress.watchedEpisodes - watchedUpToPreviousSeasons;
-
-    if (watchedInThisSeason <= 0) return 0;
-    if (watchedInThisSeason >= episodeCount) return episodeCount;
-    return watchedInThisSeason;
-  }
-
   Widget _buildTvEpisodes(
     MovieDetails? show,
     TvProgress? progressItem,
@@ -804,22 +770,10 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     final selectedSeason = _selectedSeason ?? 1;
     final episodeCount = _seasonEpisodes.length;
 
-    if (episodeCount > 0) {
-      final key = '${progressItem?.id ?? widget.show.id}:$selectedSeason';
-      _episodeCountCache[key] = episodeCount;
-    }
-
-    final watchedInSeason = _watchedInSelectedSeason(
-      progressItem,
-      selectedSeason,
-      episodeCount,
-    );
-    final isSeasonWatched =
-        episodeCount > 0 && watchedInSeason >= episodeCount;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Season selector
         Container(
           padding: const EdgeInsets.all(5),
           decoration: BoxDecoration(
@@ -895,24 +849,23 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
           ),
         ),
         const SizedBox(height: 16),
+        // Season progress button (placeholder)
         Center(
           child: _SeasonProgressButton(
-            selected: isSeasonWatched,
-            onPressed: () async {
-              await _ensureShowInProgress();
-              await notifier.toggleSeasonWatched(
-                widget.show.id,
-                selectedSeason,
-              );
+            selected: false,
+            onPressed: () {
+              // Placeholder - tracking logic will be added later
             },
           ),
         ),
         const SizedBox(height: 14),
+        // Season progress meter (placeholder)
         _SeasonProgressMeter(
-          watchedEpisodes: watchedInSeason,
+          watchedEpisodes: 0,
           totalEpisodes: episodeCount,
         ),
         const SizedBox(height: 20),
+        // Episode list
         if (_episodesLoading)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 28),
@@ -944,8 +897,6 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
               final title = (episode['name'] as String?)?.trim() ??
                   'Episode $episodeNumber';
               final stillPath = episode['still_path'] as String?;
-
-              final isWatched = watchedInSeason >= episodeNumber;
 
               return InkWell(
                 onTap: () {
@@ -988,9 +939,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         child: Text(
                           'E${episodeNumber.toString().padLeft(2, '0')}',
                           style: TextStyle(
-                            color: isWatched
-                                ? const Color(0xFF2EAF62)
-                                : scheme.onSurfaceVariant,
+                            color: scheme.onSurfaceVariant,
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.3,
@@ -1004,9 +953,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: isWatched
-                                ? scheme.onSurface.withValues(alpha: 0.82)
-                                : scheme.onSurface,
+                            color: scheme.onSurface,
                             fontSize: 14,
                             height: 1.25,
                             fontWeight: FontWeight.w700,
@@ -1014,15 +961,11 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         ),
                       ),
                       const SizedBox(width: 10),
+                      // Tick button (placeholder)
                       _EpisodeWatchedButton(
-                        selected: isWatched,
-                        onPressed: () async {
-                          await _ensureShowInProgress();
-                          await notifier.toggleEpisodeProgressAt(
-                            widget.show.id,
-                            selectedSeason,
-                            episodeNumber,
-                          );
+                        selected: false,
+                        onPressed: () {
+                          // Placeholder - tracking logic will be added later
                         },
                       ),
                     ],

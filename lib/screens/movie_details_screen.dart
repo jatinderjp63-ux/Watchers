@@ -424,9 +424,9 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen> {
   }
 
   Widget _buildOverviewSkeleton() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
+      children: [
         _SkeletonLine(width: double.infinity),
         SizedBox(height: 8),
         _SkeletonLine(width: double.infinity),

@@ -479,9 +479,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   }
 
   Widget _buildOverviewSkeleton() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
+      children: [
         _SkeletonLine(width: double.infinity),
         SizedBox(height: 8),
         _SkeletonLine(width: double.infinity),
@@ -983,27 +983,6 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       color: scheme.surfaceContainerHighest,
       alignment: Alignment.center,
       child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
-    );
-  }
-
-  Future<void> _ensureShowInProgress() async {
-    final notifier = ref.read(tvProgressProvider.notifier);
-
-    if (notifier.getShowById(widget.show.id) != null) {
-      return;
-    }
-
-    await notifier.addShow(
-      TvProgress(
-        id: widget.show.id,
-        title: widget.show.title,
-        posterPath: widget.show.posterPath,
-        currentSeason: 1,
-        currentEpisode: 1,
-        watchedEpisodes: 0,
-        totalEpisodes: details?.totalEpisodes ?? 0,
-        totalSeasons: details?.totalSeasons ?? 0,
-      ),
     );
   }
 

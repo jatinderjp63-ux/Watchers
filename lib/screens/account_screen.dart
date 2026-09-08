@@ -41,22 +41,22 @@ class AccountScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
-          _InfoTile(
+          const _InfoTile(
             icon: Icons.person_outline,
             title: 'Username',
             subtitle: 'Watchers',
           ),
-          _InfoTile(
+          const _InfoTile(
             icon: Icons.email_outlined,
             title: 'E-mail',
             subtitle: 'yourmail@example.com',
           ),
-          _InfoTile(
+          const _InfoTile(
             icon: Icons.backup_outlined,
             title: 'Backup status',
             subtitle: 'Local only',
           ),
-          _InfoTile(
+          const _InfoTile(
             icon: Icons.calendar_today_outlined,
             title: 'Joined',
             subtitle: 'August 2026',

@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
-import 'tmdb_http_client.dart';
 import 'tvmaze_service.dart';
 
 class ShowLifecycle {
@@ -105,7 +104,7 @@ class TmdbLifecycleProvider extends ShowLifecycleProvider {
 class TvMazeLifecycleProvider extends ShowLifecycleProvider {
   final TvMazeService tvMaze;
 
-  TvMazeLifecycleProvider(this.tvMaze) : super(null as Dio);
+ TvMazeLifecycleProvider(this.tvMaze) : super(Dio());
 
   @override
   Future<ShowLifecycle?> fetch(int tvId) async {

@@ -54,6 +54,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   int? _selectedSeason;
   Future<MediaLibraryItem?>? _itemFuture;
 
+  final Map<String, int> _episodeCountCache = {};
+
   String get _mediaType => 'tv';
 
   String get _detailsKey {
@@ -248,18 +250,18 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
           .whereType<Map>()
           .map((video) => Map<String, dynamic>.from(video))
           .where((video) {
-        final site = video['site']?.toString().toLowerCase() ?? '';
-        final key = video['key']?.toString() ?? '';
-        final type = video['type']?.toString().toLowerCase() ?? '';
+            final site = video['site']?.toString().toLowerCase() ?? '';
+            final key = video['key']?.toString() ?? '';
+            final type = video['type']?.toString().toLowerCase() ?? '';
 
-        return site == 'youtube' &&
-            key.isNotEmpty &&
-            (type == 'trailer' || type == 'teaser');
-      })
+            return site == 'youtube' &&
+                key.isNotEmpty &&
+                (type == 'trailer' || type == 'teaser');
+          })
           .map((video) => <String, dynamic>{
-        ...video,
-        'yt_title': video['name'] ?? '',
-      })
+                ...video,
+                'yt_title': video['name'] ?? '',
+              })
           .toList();
 
       filteredTrailers.sort((a, b) {
@@ -547,11 +549,11 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                     child: actor.profileUrl.isEmpty
                         ? _personPlaceholder()
                         : Image.network(
-                      actor.profileUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _personPlaceholder(),
-                    ),
+                            actor.profileUrl,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                _personPlaceholder(),
+                          ),
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -660,8 +662,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
         final title = youtubeTitle.trim().isNotEmpty
             ? youtubeTitle
             : tmdbTitle.trim().isNotEmpty
-            ? tmdbTitle
-            : 'Official trailer';
+                ? tmdbTitle
+                : 'Official trailer';
 
         return Column(
           children: [
@@ -752,6 +754,27 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     }
   }
 
+  int _watchedInSelectedSeason(
+    TvProgress? progress,
+    int selectedSeason,
+    int episodeCount,
+  ) {
+    if (progress == null || episodeCount == 0 || progress.totalSeasons == 0) {
+      return 0;
+    }
+
+    // Count actual watched episodes in this season from watchedEpisodeKeys
+    int watchedCount = 0;
+    for (final key in progress.watchedEpisodeKeys) {
+      // Format: tvId:s{season}e{episode}
+      if (key.startsWith('${progress.id}:s${selectedSeason}e')) {
+        watchedCount++;
+      }
+    }
+
+    return watchedCount;
+  }
+
   Widget _buildTvEpisodes(
     MovieDetails? show,
     TvProgress? progressItem,
@@ -770,10 +793,22 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     final selectedSeason = _selectedSeason ?? 1;
     final episodeCount = _seasonEpisodes.length;
 
+    if (episodeCount > 0) {
+      final key = '${progressItem?.id ?? widget.show.id}:$selectedSeason';
+      _episodeCountCache[key] = episodeCount;
+    }
+
+    final watchedInSeason = _watchedInSelectedSeason(
+      progressItem,
+      selectedSeason,
+      episodeCount,
+    );
+    final isSeasonWatched =
+        episodeCount > 0 && watchedInSeason >= episodeCount;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Season selector
         Container(
           padding: const EdgeInsets.all(5),
           decoration: BoxDecoration(
@@ -808,9 +843,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                     decoration: BoxDecoration(
                       color: isSelected
                           ? Color.alphaBlend(
-                        scheme.primary.withValues(alpha: 0.22),
-                        scheme.surface,
-                      )
+                              scheme.primary.withValues(alpha: 0.22),
+                              scheme.surface,
+                            )
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(13),
                       border: Border.all(
@@ -821,12 +856,12 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                       ),
                       boxShadow: isSelected
                           ? [
-                        BoxShadow(
-                          color: scheme.primary.withValues(alpha: 0.14),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ]
+                              BoxShadow(
+                                color: scheme.primary.withValues(alpha: 0.14),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ]
                           : null,
                     ),
                     child: Text(
@@ -849,23 +884,24 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        // Season progress button (placeholder)
         Center(
           child: _SeasonProgressButton(
-            selected: false,
-            onPressed: () {
-              // Placeholder - tracking logic will be added later
+            selected: isSeasonWatched,
+            onPressed: () async {
+              await _ensureShowInProgress();
+              await notifier.toggleSeasonWatched(
+                widget.show.id,
+                selectedSeason,
+              );
             },
           ),
         ),
         const SizedBox(height: 14),
-        // Season progress meter (placeholder)
         _SeasonProgressMeter(
-          watchedEpisodes: 0,
+          watchedEpisodes: watchedInSeason,
           totalEpisodes: episodeCount,
         ),
         const SizedBox(height: 20),
-        // Episode list
         if (_episodesLoading)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 28),
@@ -893,10 +929,14 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
             itemBuilder: (context, index) {
               final episode = _seasonEpisodes[index];
               final episodeNumber =
-              (episode['episode_number'] as int?) ?? (index + 1);
+                  (episode['episode_number'] as int?) ?? (index + 1);
               final title = (episode['name'] as String?)?.trim() ??
                   'Episode $episodeNumber';
               final stillPath = episode['still_path'] as String?;
+              
+              // Check actual watched state from watchedEpisodeKeys
+              final episodeKey = '${widget.show.id}:s${selectedSeason}e$episodeNumber';
+              final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false;
 
               return InkWell(
                 onTap: () {
@@ -914,7 +954,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                 borderRadius: BorderRadius.circular(16),
                 child: Padding(
                   padding:
-                  const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
                   child: Row(
                     children: [
                       ClipRRect(
@@ -924,12 +964,12 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                           height: 58,
                           child: stillPath != null && stillPath.isNotEmpty
                               ? Image.network(
-                            'https://image.tmdb.org/t/p/w185$stillPath',
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) {
-                              return _episodeImagePlaceholder(scheme);
-                            },
-                          )
+                                  'https://image.tmdb.org/t/p/w185$stillPath',
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) {
+                                    return _episodeImagePlaceholder(scheme);
+                                  },
+                                )
                               : _episodeImagePlaceholder(scheme),
                         ),
                       ),
@@ -939,7 +979,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         child: Text(
                           'E${episodeNumber.toString().padLeft(2, '0')}',
                           style: TextStyle(
-                            color: scheme.onSurfaceVariant,
+                            color: isWatched
+                                ? const Color(0xFF2EAF62)
+                                : scheme.onSurfaceVariant,
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.3,
@@ -953,7 +995,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: scheme.onSurface,
+                            color: isWatched
+                                ? scheme.onSurface.withValues(alpha: 0.82)
+                                : scheme.onSurface,
                             fontSize: 14,
                             height: 1.25,
                             fontWeight: FontWeight.w700,
@@ -961,11 +1005,15 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      // Tick button (placeholder)
                       _EpisodeWatchedButton(
-                        selected: false,
-                        onPressed: () {
-                          // Placeholder - tracking logic will be added later
+                        selected: isWatched,
+                        onPressed: () async {
+                          await _ensureShowInProgress();
+                          await notifier.toggleSingleEpisodeWatched(
+                            tvId: widget.show.id,
+                            seasonNumber: selectedSeason,
+                            episodeNumber: episodeNumber,
+                          );
                         },
                       ),
                     ],
@@ -983,6 +1031,27 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       color: scheme.surfaceContainerHighest,
       alignment: Alignment.center,
       child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
+    );
+  }
+
+  Future<void> _ensureShowInProgress() async {
+    final notifier = ref.read(tvProgressProvider.notifier);
+
+    if (notifier.getShowById(widget.show.id) != null) {
+      return;
+    }
+
+    await notifier.addShow(
+      TvProgress(
+        id: widget.show.id,
+        title: widget.show.title,
+        posterPath: widget.show.posterPath,
+        currentSeason: 1,
+        currentEpisode: 1,
+        watchedEpisodes: 0,
+        totalEpisodes: details?.totalEpisodes ?? 0,
+        totalSeasons: details?.totalSeasons ?? 0,
+      ),
     );
   }
 
@@ -1023,15 +1092,15 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
               child: posterUrl == null || posterUrl.isEmpty
                   ? _posterPlaceholder()
                   : CachedNetworkImage(
-                imageUrl: posterUrl,
-                width: 240,
-                height: 360,
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.low,
-                fadeInDuration: Duration.zero,
-                placeholder: (_, __) => _posterPlaceholder(),
-                errorWidget: (_, __, ___) => _posterPlaceholder(),
-              ),
+                      imageUrl: posterUrl,
+                      width: 240,
+                      height: 360,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.low,
+                      fadeInDuration: Duration.zero,
+                      placeholder: (_, __) => _posterPlaceholder(),
+                      errorWidget: (_, __, ___) => _posterPlaceholder(),
+                    ),
             ),
           ),
         ),
@@ -1057,13 +1126,11 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
 
   Widget _buildTvPage() {
     final scheme = Theme.of(context).colorScheme;
-    final tvProgressList = ref.watch(tvProgressProvider);
+    final tvProgress = ref.watch(tvProgressProvider);
     final notifier = ref.read(tvProgressProvider.notifier);
-
-    final progressItem = tvProgressList
+    final progressItem = tvProgress
         .where((progress) => progress.id == widget.show.id)
         .firstOrNull;
-
     final show = details;
 
     return Scaffold(
@@ -1127,20 +1194,20 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         key: ValueKey(_tvSelectedTab),
                         child: _tvSelectedTab == 0
                             ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildShowAboutSections(),
-                            const SizedBox(height: 16),
-                            AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 180),
-                              child: KeyedSubtree(
-                                key: ValueKey(_tvAboutSection),
-                                child:
-                                _buildShowAboutSelectedSection(show),
-                              ),
-                            ),
-                          ],
-                        )
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildShowAboutSections(),
+                                  const SizedBox(height: 16),
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 180),
+                                    child: KeyedSubtree(
+                                      key: ValueKey(_tvAboutSection),
+                                      child:
+                                          _buildShowAboutSelectedSection(show),
+                                    ),
+                                  ),
+                                ],
+                              )
                             : _buildTvEpisodes(show, progressItem, notifier),
                       ),
                     ),
@@ -1254,7 +1321,7 @@ class _SegmentSelector extends StatelessWidget {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 padding:
-                const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
                 decoration: BoxDecoration(
                   color: selected ? scheme.primary : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
@@ -1324,9 +1391,9 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
     final scheme = Theme.of(context).colorScheme;
     final surfaceColor = widget.selected
         ? Color.alphaBlend(
-      widget.selectedColor.withValues(alpha: 0.20),
-      scheme.surface,
-    )
+            widget.selectedColor.withValues(alpha: 0.20),
+            scheme.surface,
+          )
         : scheme.surface.withValues(alpha: 0.74);
     final borderColor = widget.selected
         ? widget.selectedColor.withValues(alpha: 0.85)
@@ -1335,9 +1402,9 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
         ? widget.selectedColor.withValues(alpha: 0.22)
         : scheme.surfaceContainerHighest.withValues(alpha: 0.62);
     final iconColor =
-    widget.selected ? widget.selectedColor : scheme.onSurfaceVariant;
+        widget.selected ? widget.selectedColor : scheme.onSurfaceVariant;
     final labelColor =
-    widget.selected ? scheme.onSurface : scheme.onSurfaceVariant;
+        widget.selected ? scheme.onSurface : scheme.onSurfaceVariant;
 
     return Semantics(
       button: true,
@@ -1368,20 +1435,20 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
               ),
               boxShadow: widget.selected
                   ? [
-                BoxShadow(
-                  color: widget.selectedColor.withValues(alpha: 0.18),
-                  blurRadius: 22,
-                  spreadRadius: 1,
-                  offset: const Offset(0, 7),
-                ),
-              ]
+                      BoxShadow(
+                        color: widget.selectedColor.withValues(alpha: 0.18),
+                        blurRadius: 22,
+                        spreadRadius: 1,
+                        offset: const Offset(0, 7),
+                      ),
+                    ]
                   : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.14),
-                  blurRadius: 10,
-                  offset: const Offset(0, 5),
-                ),
-              ],
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.14),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
             ),
             child: Stack(
               children: [
@@ -1423,12 +1490,12 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
                           ),
                           boxShadow: widget.selected
                               ? [
-                            BoxShadow(
-                              color: widget.selectedColor
-                                  .withValues(alpha: 0.20),
-                              blurRadius: 10,
-                            ),
-                          ]
+                                  BoxShadow(
+                                    color: widget.selectedColor
+                                        .withValues(alpha: 0.20),
+                                    blurRadius: 10,
+                                  ),
+                                ]
                               : null,
                         ),
                         child: Icon(widget.icon, size: 22, color: iconColor),
@@ -1498,9 +1565,9 @@ class _SeasonProgressButtonState extends State<_SeasonProgressButton> {
           decoration: BoxDecoration(
             color: widget.selected
                 ? Color.alphaBlend(
-              watchedColor.withValues(alpha: 0.22),
-              scheme.surface,
-            )
+                    watchedColor.withValues(alpha: 0.22),
+                    scheme.surface,
+                  )
                 : scheme.surfaceContainerHighest.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(23),
             border: Border.all(
@@ -1511,12 +1578,12 @@ class _SeasonProgressButtonState extends State<_SeasonProgressButton> {
             ),
             boxShadow: widget.selected
                 ? [
-              BoxShadow(
-                color: watchedColor.withValues(alpha: 0.18),
-                blurRadius: 16,
-                offset: const Offset(0, 6),
-              ),
-            ]
+                    BoxShadow(
+                      color: watchedColor.withValues(alpha: 0.18),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ]
                 : null,
           ),
           child: Row(
@@ -1572,8 +1639,8 @@ class _SeasonProgressMeter extends StatelessWidget {
     final label = safeTotal == 0
         ? 'Loading season progress'
         : complete
-        ? 'Season complete'
-        : '$safeWatched / $safeTotal watched';
+            ? 'Season complete'
+            : '$safeWatched / $safeTotal watched';
 
     return Semantics(
       label: safeTotal == 0
@@ -1669,11 +1736,11 @@ class _SeasonProgressMeter extends StatelessWidget {
 
 class _EpisodeWatchedButton extends StatefulWidget {
   final bool selected;
-  final VoidCallback? onPressed;
+  final VoidCallback onPressed;
 
   const _EpisodeWatchedButton({
     required this.selected,
-    this.onPressed,
+    required this.onPressed,
   });
 
   @override
@@ -1689,16 +1756,12 @@ class _EpisodeWatchedButtonState extends State<_EpisodeWatchedButton> {
     const watchedColor = Color(0xFF2EAF62);
 
     return GestureDetector(
-      onTapDown: widget.onPressed != null
-          ? (_) => setState(() => _pressed = true)
-          : null,
+      onTapDown: (_) => setState(() => _pressed = true),
       onTapCancel: () => setState(() => _pressed = false),
-      onTapUp: widget.onPressed != null
-          ? (_) {
+      onTapUp: (_) {
         setState(() => _pressed = false);
-        widget.onPressed!();
-      }
-          : null,
+        widget.onPressed();
+      },
       child: AnimatedScale(
         scale: _pressed ? 0.88 : 1,
         duration: const Duration(milliseconds: 110),
@@ -1719,11 +1782,11 @@ class _EpisodeWatchedButtonState extends State<_EpisodeWatchedButton> {
             ),
             boxShadow: widget.selected
                 ? [
-              BoxShadow(
-                color: watchedColor.withValues(alpha: 0.16),
-                blurRadius: 10,
-              ),
-            ]
+                    BoxShadow(
+                      color: watchedColor.withValues(alpha: 0.16),
+                      blurRadius: 10,
+                    ),
+                  ]
                 : null,
           ),
           child: Icon(

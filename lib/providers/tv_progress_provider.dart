@@ -358,8 +358,9 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     int targetIndex = -1;
     for (var i = 0; i < snapshot.releasedEpisodes.length; i++) {
-      final ep = snapshot.releasedEpisodes[i];
-      if (ep.key == targetKey) {
+      final episode = snapshot.releasedEpisodes[i];
+
+      if (episode.key == targetKey) {
         targetIndex = i;
         break;
       }
@@ -418,7 +419,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final seasonReleased = snapshot.releasedEpisodes
-        .where((ep) => ep.seasonNumber == seasonNumber)
+        .where((episode) => episode.seasonNumber == seasonNumber)
         .toList();
 
     if (seasonReleased.isEmpty) {
@@ -433,8 +434,9 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     int targetIndex = -1;
     for (var i = 0; i < seasonReleased.length; i++) {
-      final ep = seasonReleased[i];
-      if (ep.key == targetKey) {
+      final episode = seasonReleased[i];
+
+      if (episode.key == targetKey) {
         targetIndex = i;
         break;
       }
@@ -462,7 +464,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     await _applyWatchedKeys(snapshot, keys);
   }
 
-  /// Mark an episode and all earlier released episodes in the same season,
+  /// Mark an episode and all earlier released episodes in the same season
   /// plus all released episodes in all previous seasons.
   /// This is Step 2 of the mark-previous-episodes feature.
   Future<void> markWatchedUpToEpisodeIncludingPreviousSeasons({
@@ -497,14 +499,14 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     final keys = {...snapshot.watchedKeys};
 
-    for (final ep in snapshot.releasedEpisodes) {
-      if (ep.seasonNumber < seasonNumber) {
-        keys.add(ep.key);
+    for (final episode in snapshot.releasedEpisodes) {
+      if (episode.seasonNumber < seasonNumber) {
+        keys.add(episode.key);
       }
     }
 
     final seasonReleased = snapshot.releasedEpisodes
-        .where((ep) => ep.seasonNumber == seasonNumber)
+        .where((episode) => episode.seasonNumber == seasonNumber)
         .toList();
 
     if (seasonReleased.isNotEmpty) {
@@ -512,8 +514,9 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
       int targetIndex = -1;
       for (var i = 0; i < seasonReleased.length; i++) {
-        final ep = seasonReleased[i];
-        if (ep.key == targetKey) {
+        final episode = seasonReleased[i];
+
+        if (episode.key == targetKey) {
           targetIndex = i;
           break;
         }
@@ -537,8 +540,9 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
   /// Toggle a single episode's watched state in a season:
-  /// - If unwatched, mark it and all earlier released episodes in that season.
-  /// - If watched, unmark only that episode.
+  /// - If episode is unwatched: mark it and all earlier released episodes in
+  ///   that season.
+  /// - If episode is watched: unmark only that episode.
   Future<void> toggleEpisodeWatchedInSeason({
     required int tvId,
     required int seasonNumber,
@@ -559,6 +563,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final snapshot = await _buildSnapshot(progress);
+
     if (snapshot.releasedEpisodes.isEmpty) {
       debugPrint(
         'TvProgressNotifier: toggleEpisodeWatchedInSeason: '
@@ -568,7 +573,8 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
-    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(targetKey);
+    final isCurrentlyWatched =
+        progress.watchedEpisodeKeys.contains(targetKey);
 
     if (isCurrentlyWatched) {
       final newKeys = {...progress.watchedEpisodeKeys};
@@ -595,10 +601,10 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
   }
 
-  /// Toggle a single episode's watched state with Step 2 marking behavior:
-  /// - If unwatched, mark it, all earlier episodes in the season,
+  /// Toggle a single episode's watched state with previous-season marking:
+  /// - If episode is unwatched: mark it, all earlier episodes in the season,
   ///   and all released episodes in previous seasons.
-  /// - If watched, unmark only that episode.
+  /// - If episode is watched: unmark only that episode.
   Future<void> toggleEpisodeWatchedIncludingPreviousSeasons({
     required int tvId,
     required int seasonNumber,
@@ -621,6 +627,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final snapshot = await _buildSnapshot(progress);
+
     if (snapshot.releasedEpisodes.isEmpty) {
       debugPrint(
         'TvProgressNotifier: '
@@ -631,7 +638,8 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
-    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(targetKey);
+    final isCurrentlyWatched =
+        progress.watchedEpisodeKeys.contains(targetKey);
 
     if (isCurrentlyWatched) {
       final newKeys = {...progress.watchedEpisodeKeys};
@@ -660,7 +668,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
   /// Unmark the tapped episode and all later released episodes in the same
-  /// season. Future seasons are intentionally unchanged in Step 1.
+  /// season. Future seasons remain unchanged during Step 1.
   Future<void> markUnwatchedFromEpisodeInSeason({
     required int tvId,
     required int seasonNumber,
@@ -722,8 +730,82 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     await _applyWatchedKeys(snapshot, keys);
   }
 
-  /// Unmark an episode and all later released episodes across all seasons
-  /// as unwatched. Reserved for Step 2.
+  /// Unmark the tapped episode and all later released episodes in the current
+  /// season, plus all released episodes in future seasons.
+  ///
+  /// Previous seasons remain unchanged. Unreleased episodes remain unchanged.
+  Future<void> markUnwatchedFromEpisodeIncludingFutureSeasons({
+    required int tvId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    debugPrint(
+      'TvProgressNotifier: '
+      'markUnwatchedFromEpisodeIncludingFutureSeasons called: '
+      'tvId=$tvId, S$seasonNumber E$episodeNumber',
+    );
+
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint(
+        'TvProgressNotifier: '
+        'markUnwatchedFromEpisodeIncludingFutureSeasons: '
+        'no progress found for tvId=$tvId',
+      );
+      return;
+    }
+
+    final snapshot = await _buildSnapshot(progress);
+
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint(
+        'TvProgressNotifier: '
+        'markUnwatchedFromEpisodeIncludingFutureSeasons: '
+        'no released episodes for tvId=$tvId',
+      );
+      return;
+    }
+
+    final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
+
+    final targetIndex = snapshot.releasedEpisodes.indexWhere(
+      (episode) => episode.key == targetKey,
+    );
+
+    if (targetIndex < 0) {
+      debugPrint(
+        'TvProgressNotifier: '
+        'markUnwatchedFromEpisodeIncludingFutureSeasons: '
+        'target episode not found in released list',
+      );
+      return;
+    }
+
+    final keys = {...snapshot.watchedKeys};
+
+    for (final episode in snapshot.releasedEpisodes) {
+      final isCurrentSeason = episode.seasonNumber == seasonNumber;
+      final isLaterSeason = episode.seasonNumber > seasonNumber;
+
+      if (isLaterSeason) {
+        keys.remove(episode.key);
+      } else if (isCurrentSeason &&
+          episode.episodeNumber >= episodeNumber) {
+        keys.remove(episode.key);
+      }
+    }
+
+    debugPrint(
+      'TvProgressNotifier: '
+      'markUnwatchedFromEpisodeIncludingFutureSeasons: '
+      'resulting watched count=${keys.length}',
+    );
+
+    await _applyWatchedKeys(snapshot, keys);
+  }
+
+  /// Unmark an episode and all later released episodes across all seasons.
+  /// Kept for compatibility and reserved for the original cross-season path.
   Future<void> markUnwatchedFromEpisode({
     required int tvId,
     required int seasonNumber,
@@ -744,6 +826,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final snapshot = await _buildSnapshot(progress);
+
     if (snapshot.releasedEpisodes.isEmpty) {
       debugPrint(
         'TvProgressNotifier: markUnwatchedFromEpisode: '
@@ -756,8 +839,9 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     int targetIndex = -1;
     for (var i = 0; i < snapshot.releasedEpisodes.length; i++) {
-      final ep = snapshot.releasedEpisodes[i];
-      if (ep.key == targetKey) {
+      final episode = snapshot.releasedEpisodes[i];
+
+      if (episode.key == targetKey) {
         targetIndex = i;
         break;
       }
@@ -786,10 +870,10 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
   /// Episode tick interaction:
-  /// - If unwatched and released: markWatchedUpToEpisode.
-  /// - If watched and released: unmark this episode and later episodes in
-  ///   the same season only during Step 1.
-  /// - If not released: do nothing.
+  /// - If episode is unwatched and released: markWatchedUpToEpisode.
+  /// - If episode is watched and released: unmark the current season and
+  ///   all future seasons during Step 2.
+  /// - If episode is not released: do nothing.
   Future<void> toggleEpisodeProgressAt(
     int tvId,
     int seasonNumber,
@@ -816,12 +900,13 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final snapshot = await _buildSnapshot(progress);
+
     final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
 
     final isReleased = snapshot.releasedEpisodes.any(
-      (ep) =>
-          ep.seasonNumber == seasonNumber &&
-          ep.episodeNumber == episodeNumber,
+      (episode) =>
+          episode.seasonNumber == seasonNumber &&
+          episode.episodeNumber == episodeNumber,
     );
 
     if (!isReleased) {
@@ -840,7 +925,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     );
 
     if (isWatched) {
-      await markUnwatchedFromEpisodeInSeason(
+      await markUnwatchedFromEpisodeIncludingFutureSeasons(
         tvId: tvId,
         seasonNumber: seasonNumber,
         episodeNumber: episodeNumber,
@@ -886,7 +971,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     final snapshot = await _buildSnapshot(progress);
 
     final seasonReleased = snapshot.releasedEpisodes
-        .where((ep) => ep.seasonNumber == seasonNumber)
+        .where((episode) => episode.seasonNumber == seasonNumber)
         .toList();
 
     if (seasonReleased.isEmpty) {
@@ -898,7 +983,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final allWatched = seasonReleased.every(
-      (ep) => progress.watchedEpisodeKeys.contains(ep.key),
+      (episode) => progress.watchedEpisodeKeys.contains(episode.key),
     );
 
     debugPrint(
@@ -910,12 +995,12 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     final keys = {...progress.watchedEpisodeKeys};
 
     if (allWatched) {
-      for (final ep in seasonReleased) {
-        keys.remove(ep.key);
+      for (final episode in seasonReleased) {
+        keys.remove(episode.key);
       }
     } else {
-      for (final ep in seasonReleased) {
-        keys.add(ep.key);
+      for (final episode in seasonReleased) {
+        keys.add(episode.key);
       }
     }
 
@@ -940,6 +1025,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     );
 
     final progress = getShowById(tvId);
+
     if (progress == null) {
       debugPrint(
         'TvProgressNotifier: toggleSingleEpisodeWatched: '
@@ -953,12 +1039,14 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     if (currentKeys.contains(targetKey)) {
       currentKeys.remove(targetKey);
+
       debugPrint(
         'TvProgressNotifier: toggleSingleEpisodeWatched: '
         'unmarked episode $targetKey',
       );
     } else {
       currentKeys.add(targetKey);
+
       debugPrint(
         'TvProgressNotifier: toggleSingleEpisodeWatched: '
         'marked episode $targetKey',
@@ -975,7 +1063,8 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     debugPrint(
       'TvProgressNotifier: toggleSingleEpisodeWatched: '
-      'saved progress for id=$tvId, watched count=${currentKeys.length}',
+      'saved progress for id=$tvId, '
+      'watched count=${currentKeys.length}',
     );
   }
 
@@ -987,6 +1076,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     );
 
     final progress = getShowById(tvId);
+
     if (progress == null) {
       debugPrint(
         'TvProgressNotifier: markAllReleasedEpisodesWatched: '
@@ -998,8 +1088,8 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     final snapshot = await _buildSnapshot(progress);
     final keys = {...progress.watchedEpisodeKeys};
 
-    for (final ep in snapshot.releasedEpisodes) {
-      keys.add(ep.key);
+    for (final episode in snapshot.releasedEpisodes) {
+      keys.add(episode.key);
     }
 
     debugPrint(
@@ -1074,11 +1164,13 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
   Future<List<TvEpisodePosition>> _getEpisodeCatalog(int tvId) async {
     final cached = _catalogCache[tvId];
+
     if (cached != null) {
       return cached;
     }
 
     final activeRequest = _catalogRequests[tvId];
+
     if (activeRequest != null) {
       return activeRequest;
     }
@@ -1165,7 +1257,10 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     for (var season = 1; season <= 40; season++) {
       try {
-        final episodes = await _tmdbService.getSeasonEpisodes(tvId, season);
+        final episodes = await _tmdbService.getSeasonEpisodes(
+          tvId,
+          season,
+        );
 
         if (episodes.isEmpty) {
           return season - 1;
@@ -1242,7 +1337,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
   TvProgress _normalizeShow(TvProgress show) {
-    // Accept both old format (108978:1:2) and new format (108978:s1e2)
+    // Accept both old format (108978:1:2) and new format (108978:s1e2).
     final safeKeys = show.watchedEpisodeKeys
         .where(_isEpisodeKey)
         .toSet();
@@ -1259,7 +1354,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
   bool _isEpisodeKey(String value) {
-    // Accept new format: 108978:s1e2
+    // Accept new format: 108978:s1e2.
     if (value.contains(':s') && value.contains('e')) {
       final parts = value.split(':');
 
@@ -1289,7 +1384,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
           episode > 0;
     }
 
-    // Accept old format: 108978:1:2
+    // Accept old format: 108978:1:2.
     final parts = value.split(':');
 
     if (parts.length != 3) {
@@ -1315,12 +1410,13 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
   }
 
-  // Compatibility methods for existing callers
+  // Compatibility methods for existing callers.
 
   Future<TvProgressSnapshot?> getSnapshot(int id) async {
     debugPrint('TvProgressNotifier: getSnapshot called: id=$id');
 
     final progress = getShowById(id);
+
     if (progress == null) {
       debugPrint(
         'TvProgressNotifier: getSnapshot: '
@@ -1332,7 +1428,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     return _buildSnapshot(progress);
   }
 
-  /// Kept for compatibility; now uses the same logic as toggleEpisodeProgressAt.
+  /// Kept for compatibility; uses the current episode toggle behavior.
   Future<void> toggleEpisodeWatchedAt(
     int id,
     int seasonNumber,
@@ -1343,6 +1439,10 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
       'id=$id, S$seasonNumber E$episodeNumber',
     );
 
-    await toggleEpisodeProgressAt(id, seasonNumber, episodeNumber);
+    await toggleEpisodeProgressAt(
+      id,
+      seasonNumber,
+      episodeNumber,
+    );
   }
 }

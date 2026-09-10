@@ -763,7 +763,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       return 0;
     }
 
-    int watchedCount = 0;
+    var watchedCount = 0;
+
     for (final key in progress.watchedEpisodeKeys) {
       if (key.startsWith('${progress.id}:s${selectedSeason}e')) {
         watchedCount++;
@@ -1018,7 +1019,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                           await _ensureShowInProgress();
 
                           if (isWatched) {
-                            await notifier.markUnwatchedFromEpisodeInSeason(
+                            await notifier
+                                .markUnwatchedFromEpisodeIncludingFutureSeasons(
                               tvId: widget.show.id,
                               seasonNumber: selectedSeason,
                               episodeNumber: episodeNumber,

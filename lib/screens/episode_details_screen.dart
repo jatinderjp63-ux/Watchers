@@ -209,7 +209,7 @@ class _EpisodeDetailsScreenState extends ConsumerState<EpisodeDetailsScreen> {
         progress?.watchedEpisodeKeys.contains(episodeKey) ?? false;
 
     if (isWatched) {
-      await notifier.markUnwatchedFromEpisodeInSeason(
+      await notifier.markUnwatchedFromEpisodeIncludingFutureSeasons(
         tvId: widget.show.id,
         seasonNumber: widget.seasonNumber,
         episodeNumber: widget.episodeNumber,

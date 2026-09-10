@@ -1009,7 +1009,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         selected: isWatched,
                         onPressed: () async {
                           await _ensureShowInProgress();
-                          await notifier.toggleEpisodeWatchedInSeason(
+                          await notifier.toggleEpisodeWatchedIncludingPreviousSeasons(
                             tvId: widget.show.id,
                             seasonNumber: selectedSeason,
                             episodeNumber: episodeNumber,

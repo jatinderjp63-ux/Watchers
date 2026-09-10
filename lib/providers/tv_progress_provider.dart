@@ -478,6 +478,71 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
 
+  /// Mark an episode and all earlier released episodes **in the same season**
+  /// plus **all released episodes in all previous seasons**.
+  /// This is Step 2 of the "mark previous episodes" feature.
+  Future<void> markWatchedUpToEpisodeIncludingPreviousSeasons({
+    required int tvId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    debugPrint('TvProgressNotifier: markWatchedUpToEpisodeIncludingPreviousSeasons called: tvId=$tvId, S$seasonNumber E$episodeNumber');
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisodeIncludingPreviousSeasons: no progress found for tvId=$tvId');
+      return;
+    }
+
+
+    final snapshot = await _buildSnapshot(progress);
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisodeIncludingPreviousSeasons: no released episodes for tvId=$tvId');
+      return;
+    }
+
+
+    final keys = {...snapshot.watchedKeys};
+
+
+    // Mark all released episodes in previous seasons (< seasonNumber)
+    for (final ep in snapshot.releasedEpisodes) {
+      if (ep.seasonNumber < seasonNumber) {
+        keys.add(ep.key);
+      }
+    }
+
+
+    // Mark all released episodes in the target season up to and including the target
+    final seasonReleased = snapshot.releasedEpisodes
+        .where((ep) => ep.seasonNumber == seasonNumber)
+        .toList();
+
+
+    if (seasonReleased.isNotEmpty) {
+      final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
+
+      int targetIndex = -1;
+      for (var i = 0; i < seasonReleased.length; i++) {
+        final ep = seasonReleased[i];
+        if (ep.key == targetKey) {
+          targetIndex = i;
+          break;
+        }
+      }
+
+      if (targetIndex >= 0) {
+        for (var i = 0; i <= targetIndex; i++) {
+          keys.add(seasonReleased[i].key);
+        }
+      }
+    }
+
+
+    debugPrint('TvProgressNotifier: markWatchedUpToEpisodeIncludingPreviousSeasons: marking ${keys.length} episodes as watched (including previous seasons)');
+    await _applyWatchedKeys(snapshot, keys);
+  }
+
+
   /// Toggle a single episode's watched state in a season:
   /// - If episode is unwatched: mark it and all earlier released episodes in that season.
   /// - If episode is watched: unmark only that episode (no cascade for now).
@@ -519,6 +584,56 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     } else {
       // Mark this episode and all earlier released episodes in this season
       await markWatchedUpToEpisodeInSeason(
+        tvId: tvId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+      );
+    }
+  }
+
+
+  /// Toggle a single episode's watched state with Step 2 behavior:
+  /// - If episode is unwatched: mark it, all earlier episodes in the season,
+  ///   and all released episodes in previous seasons.
+  /// - If episode is watched: unmark only that episode (no cascade for now).
+  Future<void> toggleEpisodeWatchedIncludingPreviousSeasons({
+    required int tvId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    debugPrint('TvProgressNotifier: toggleEpisodeWatchedIncludingPreviousSeasons called: tvId=$tvId, S$seasonNumber E$episodeNumber');
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: toggleEpisodeWatchedIncludingPreviousSeasons: no progress found for tvId=$tvId');
+      return;
+    }
+
+    final snapshot = await _buildSnapshot(progress);
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint('TvProgressNotifier: toggleEpisodeWatchedIncludingPreviousSeasons: no released episodes for tvId=$tvId');
+      return;
+    }
+
+    final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
+    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(targetKey);
+
+    if (isCurrentlyWatched) {
+      // Unmark only this episode
+      final newKeys = {...progress.watchedEpisodeKeys};
+      newKeys.remove(targetKey);
+
+      final updated = progress.copyWith(
+        watchedEpisodeKeys: newKeys,
+        watchedEpisodes: newKeys.length,
+      );
+
+      _replaceShow(_normalizeShow(updated));
+      await _save();
+
+      debugPrint('TvProgressNotifier: toggleEpisodeWatchedIncludingPreviousSeasons: unmarked episode $targetKey');
+    } else {
+      // Mark this episode, all earlier in season, and all previous seasons
+      await markWatchedUpToEpisodeIncludingPreviousSeasons(
         tvId: tvId,
         seasonNumber: seasonNumber,
         episodeNumber: episodeNumber,

@@ -201,7 +201,7 @@ class _EpisodeDetailsScreenState extends ConsumerState<EpisodeDetailsScreen> {
 
     final notifier = ref.read(tvProgressProvider.notifier);
     
-    await notifier.toggleEpisodeWatchedInSeason(
+    await notifier.toggleEpisodeWatchedIncludingPreviousSeasons(
       tvId: widget.show.id,
       seasonNumber: widget.seasonNumber,
       episodeNumber: widget.episodeNumber,

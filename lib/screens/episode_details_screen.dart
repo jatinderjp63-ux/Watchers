@@ -200,12 +200,27 @@ class _EpisodeDetailsScreenState extends ConsumerState<EpisodeDetailsScreen> {
     await _ensureShowInProgress();
 
     final notifier = ref.read(tvProgressProvider.notifier);
-    
-    await notifier.toggleEpisodeWatchedIncludingPreviousSeasons(
-      tvId: widget.show.id,
-      seasonNumber: widget.seasonNumber,
-      episodeNumber: widget.episodeNumber,
-    );
+    final progress = notifier.getShowById(widget.show.id);
+
+    final episodeKey =
+        '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
+
+    final isWatched =
+        progress?.watchedEpisodeKeys.contains(episodeKey) ?? false;
+
+    if (isWatched) {
+      await notifier.markUnwatchedFromEpisodeInSeason(
+        tvId: widget.show.id,
+        seasonNumber: widget.seasonNumber,
+        episodeNumber: widget.episodeNumber,
+      );
+    } else {
+      await notifier.toggleEpisodeWatchedIncludingPreviousSeasons(
+        tvId: widget.show.id,
+        seasonNumber: widget.seasonNumber,
+        episodeNumber: widget.episodeNumber,
+      );
+    }
   }
 
   Widget _buildStillImage(ColorScheme scheme) {
@@ -248,11 +263,17 @@ class _EpisodeDetailsScreenState extends ConsumerState<EpisodeDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    
+
     final progressItems = ref.watch(tvProgressProvider);
-    final progress = progressItems.where((item) => item.id == widget.show.id).firstOrNull;
-    final episodeKey = '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
-    final isWatched = progress?.watchedEpisodeKeys.contains(episodeKey) ?? false;
+    final progress = progressItems
+        .where((item) => item.id == widget.show.id)
+        .firstOrNull;
+
+    final episodeKey =
+        '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
+
+    final isWatched =
+        progress?.watchedEpisodeKeys.contains(episodeKey) ?? false;
 
     return Scaffold(
       body: CustomScrollView(
@@ -467,7 +488,8 @@ class _EpisodeProgressButtonState extends State<_EpisodeProgressButton> {
                   widget.selected
                       ? Icons.check_circle_rounded
                       : Icons.check_circle_outline_rounded,
-                  color: widget.selected ? watchedColor : scheme.onSurfaceVariant,
+                  color:
+                      widget.selected ? watchedColor : scheme.onSurfaceVariant,
                   size: 21,
                 ),
                 const SizedBox(width: 9),

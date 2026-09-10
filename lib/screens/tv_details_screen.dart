@@ -763,10 +763,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       return 0;
     }
 
-    // Count actual watched episodes in this season from watchedEpisodeKeys
     int watchedCount = 0;
     for (final key in progress.watchedEpisodeKeys) {
-      // Format: tvId:s{season}e{episode}
       if (key.startsWith('${progress.id}:s${selectedSeason}e')) {
         watchedCount++;
       }
@@ -803,6 +801,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       selectedSeason,
       episodeCount,
     );
+
     final isSeasonWatched =
         episodeCount > 0 && watchedInSeason >= episodeCount;
 
@@ -814,7 +813,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
           decoration: BoxDecoration(
             color: scheme.surface.withValues(alpha: 0.75),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: scheme.outline.withValues(alpha: 0.22)),
+            border: Border.all(
+              color: scheme.outline.withValues(alpha: 0.22),
+            ),
           ),
           child: SizedBox(
             height: 44,
@@ -829,9 +830,11 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                 return GestureDetector(
                   onTap: () {
                     if (isSelected) return;
+
                     setState(() {
                       _selectedSeason = seasonNumber;
                     });
+
                     _loadSeasonEpisodes(seasonNumber);
                   },
                   child: AnimatedContainer(
@@ -871,9 +874,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                             ? scheme.onSurface
                             : scheme.onSurfaceVariant,
                         fontSize: 13,
-                        fontWeight: isSelected
-                            ? FontWeight.w800
-                            : FontWeight.w600,
+                        fontWeight:
+                            isSelected ? FontWeight.w800 : FontWeight.w600,
                         letterSpacing: 0.4,
                       ),
                     ),
@@ -889,6 +891,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
             selected: isSeasonWatched,
             onPressed: () async {
               await _ensureShowInProgress();
+
               await notifier.toggleSeasonWatched(
                 widget.show.id,
                 selectedSeason,
@@ -933,10 +936,12 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
               final title = (episode['name'] as String?)?.trim() ??
                   'Episode $episodeNumber';
               final stillPath = episode['still_path'] as String?;
-              
-              // Check actual watched state from watchedEpisodeKeys
-              final episodeKey = '${widget.show.id}:s${selectedSeason}e$episodeNumber';
-              final isWatched = progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false;
+
+              final episodeKey =
+                  '${widget.show.id}:s${selectedSeason}e$episodeNumber';
+
+              final isWatched =
+                  progressItem?.watchedEpisodeKeys.contains(episodeKey) ?? false;
 
               return InkWell(
                 onTap: () {
@@ -953,8 +958,10 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                 },
                 borderRadius: BorderRadius.circular(16),
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 2),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 10,
+                    horizontal: 2,
+                  ),
                   child: Row(
                     children: [
                       ClipRRect(
@@ -1009,11 +1016,21 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         selected: isWatched,
                         onPressed: () async {
                           await _ensureShowInProgress();
-                          await notifier.toggleEpisodeWatchedIncludingPreviousSeasons(
-                            tvId: widget.show.id,
-                            seasonNumber: selectedSeason,
-                            episodeNumber: episodeNumber,
-                          );
+
+                          if (isWatched) {
+                            await notifier.markUnwatchedFromEpisodeInSeason(
+                              tvId: widget.show.id,
+                              seasonNumber: selectedSeason,
+                              episodeNumber: episodeNumber,
+                            );
+                          } else {
+                            await notifier
+                                .toggleEpisodeWatchedIncludingPreviousSeasons(
+                              tvId: widget.show.id,
+                              seasonNumber: selectedSeason,
+                              episodeNumber: episodeNumber,
+                            );
+                          }
                         },
                       ),
                     ],
@@ -1030,7 +1047,10 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     return Container(
       color: scheme.surfaceContainerHighest,
       alignment: Alignment.center,
-      child: Icon(Icons.movie_outlined, color: scheme.onSurfaceVariant),
+      child: Icon(
+        Icons.movie_outlined,
+        color: scheme.onSurfaceVariant,
+      ),
     );
   }
 
@@ -1065,7 +1085,10 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       children: [
         if (posterUrl != null && posterUrl.isNotEmpty)
           ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+            imageFilter: ImageFilter.blur(
+              sigmaX: 24,
+              sigmaY: 24,
+            ),
             child: CachedNetworkImage(
               imageUrl: posterUrl,
               fit: BoxFit.cover,
@@ -1073,17 +1096,23 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
               fadeInDuration: Duration.zero,
               placeholder: (_, __) {
                 return Container(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerHighest,
                 );
               },
               errorWidget: (_, __, ___) {
                 return Container(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerHighest,
                 );
               },
             ),
           ),
-        Container(color: Colors.black.withValues(alpha: 0.45)),
+        Container(
+          color: Colors.black.withValues(alpha: 0.45),
+        ),
         Center(
           child: Hero(
             tag: widget.heroTag,
@@ -1128,9 +1157,11 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     final scheme = Theme.of(context).colorScheme;
     final tvProgress = ref.watch(tvProgressProvider);
     final notifier = ref.read(tvProgressProvider.notifier);
+
     final progressItem = tvProgress
         .where((progress) => progress.id == widget.show.id)
         .firstOrNull;
+
     final show = details;
 
     return Scaffold(
@@ -1208,7 +1239,11 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                                   ),
                                 ],
                               )
-                            : _buildTvEpisodes(show, progressItem, notifier),
+                            : _buildTvEpisodes(
+                                show,
+                                progressItem,
+                                notifier,
+                              ),
                       ),
                     ),
                   ],
@@ -1223,6 +1258,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
 
   Widget _posterPlaceholder() {
     final scheme = Theme.of(context).colorScheme;
+
     return Container(
       width: 240,
       height: 360,
@@ -1237,9 +1273,13 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
 
   Widget _personPlaceholder() {
     final scheme = Theme.of(context).colorScheme;
+
     return Container(
       color: scheme.surfaceContainerHighest,
-      child: Icon(Icons.person, color: scheme.onSurfaceVariant),
+      child: Icon(
+        Icons.person,
+        color: scheme.onSurfaceVariant,
+      ),
     );
   }
 
@@ -1287,8 +1327,6 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   }
 }
 
-// -------------------------- Helper Widgets --------------------------
-
 class _SegmentSelector extends StatelessWidget {
   final List<String> labels;
   final int selectedIndex;
@@ -1320,8 +1358,10 @@ class _SegmentSelector extends StatelessWidget {
               onTap: () => onSelected(index),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 8,
+                ),
                 decoration: BoxDecoration(
                   color: selected ? scheme.primary : Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
@@ -1330,9 +1370,11 @@ class _SegmentSelector extends StatelessWidget {
                   labels[index],
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: selected ? scheme.onPrimary : scheme.onSurfaceVariant,
+                    color:
+                        selected ? scheme.onPrimary : scheme.onSurfaceVariant,
                     fontSize: 13,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight:
+                        selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
               ),
@@ -1389,20 +1431,25 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+
     final surfaceColor = widget.selected
         ? Color.alphaBlend(
             widget.selectedColor.withValues(alpha: 0.20),
             scheme.surface,
           )
         : scheme.surface.withValues(alpha: 0.74);
+
     final borderColor = widget.selected
         ? widget.selectedColor.withValues(alpha: 0.85)
         : scheme.outline.withValues(alpha: 0.20);
+
     final iconSurface = widget.selected
         ? widget.selectedColor.withValues(alpha: 0.22)
         : scheme.surfaceContainerHighest.withValues(alpha: 0.62);
+
     final iconColor =
         widget.selected ? widget.selectedColor : scheme.onSurfaceVariant;
+
     final labelColor =
         widget.selected ? scheme.onSurface : scheme.onSurfaceVariant;
 
@@ -1485,7 +1532,8 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
                           shape: BoxShape.circle,
                           border: Border.all(
                             color: widget.selected
-                                ? widget.selectedColor.withValues(alpha: 0.48)
+                                ? widget.selectedColor
+                                    .withValues(alpha: 0.48)
                                 : scheme.outline.withValues(alpha: 0.18),
                           ),
                           boxShadow: widget.selected
@@ -1498,7 +1546,11 @@ class _PremiumStatusButtonState extends State<_PremiumStatusButton> {
                                 ]
                               : null,
                         ),
-                        child: Icon(widget.icon, size: 22, color: iconColor),
+                        child: Icon(
+                          widget.icon,
+                          size: 22,
+                          color: iconColor,
+                        ),
                       ),
                       const SizedBox(height: 7),
                       AnimatedDefaultTextStyle(
@@ -1594,7 +1646,9 @@ class _SeasonProgressButtonState extends State<_SeasonProgressButton> {
                     ? Icons.check_circle_rounded
                     : Icons.check_circle_outline_rounded,
                 size: 19,
-                color: widget.selected ? watchedColor : scheme.onSurfaceVariant,
+                color: widget.selected
+                    ? watchedColor
+                    : scheme.onSurfaceVariant,
               ),
               const SizedBox(width: 8),
               Text(
@@ -1630,9 +1684,8 @@ class _SeasonProgressMeter extends StatelessWidget {
     const watchedColor = Color(0xFF2EAF62);
 
     final safeTotal = totalEpisodes < 0 ? 0 : totalEpisodes;
-    final safeWatched = safeTotal == 0
-        ? 0
-        : watchedEpisodes.clamp(0, safeTotal);
+    final safeWatched =
+        safeTotal == 0 ? 0 : watchedEpisodes.clamp(0, safeTotal);
     final progress = safeTotal == 0 ? 0.0 : safeWatched / safeTotal;
     final complete = safeTotal > 0 && safeWatched >= safeTotal;
 
@@ -1646,7 +1699,9 @@ class _SeasonProgressMeter extends StatelessWidget {
       label: safeTotal == 0
           ? 'Loading season progress'
           : '$safeWatched of $safeTotal episodes watched',
-      value: safeTotal == 0 ? null : '${(progress * 100).round()} percent',
+      value: safeTotal == 0
+          ? null
+          : '${(progress * 100).round()} percent',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1657,13 +1712,17 @@ class _SeasonProgressMeter extends StatelessWidget {
                     ? Icons.check_circle_rounded
                     : Icons.play_circle_outline_rounded,
                 size: 15,
-                color: complete ? watchedColor : scheme.onSurfaceVariant,
+                color: complete
+                    ? watchedColor
+                    : scheme.onSurfaceVariant,
               ),
               const SizedBox(width: 7),
               Text(
                 label,
                 style: TextStyle(
-                  color: complete ? watchedColor : scheme.onSurfaceVariant,
+                  color: complete
+                      ? watchedColor
+                      : scheme.onSurfaceVariant,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
@@ -1673,7 +1732,9 @@ class _SeasonProgressMeter extends StatelessWidget {
                 Text(
                   '${(progress * 100).round()}%',
                   style: TextStyle(
-                    color: complete ? watchedColor : scheme.onSurfaceVariant,
+                    color: complete
+                        ? watchedColor
+                        : scheme.onSurfaceVariant,
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
                   ),
@@ -1695,7 +1756,10 @@ class _SeasonProgressMeter extends StatelessWidget {
                     ),
                   ),
                   TweenAnimationBuilder<double>(
-                    tween: Tween<double>(begin: 0, end: progress),
+                    tween: Tween<double>(
+                      begin: 0,
+                      end: progress,
+                    ),
                     duration: const Duration(milliseconds: 420),
                     curve: Curves.easeOutCubic,
                     builder: (context, value, _) {
@@ -1714,7 +1778,8 @@ class _SeasonProgressMeter extends StatelessWidget {
                               borderRadius: BorderRadius.circular(99),
                               boxShadow: [
                                 BoxShadow(
-                                  color: watchedColor.withValues(alpha: 0.40),
+                                  color:
+                                      watchedColor.withValues(alpha: 0.40),
                                   blurRadius: 9,
                                 ),
                               ],
@@ -1794,7 +1859,9 @@ class _EpisodeWatchedButtonState extends State<_EpisodeWatchedButton> {
                 ? Icons.check_rounded
                 : Icons.check_circle_outline_rounded,
             size: 21,
-            color: widget.selected ? watchedColor : scheme.onSurfaceVariant,
+            color: widget.selected
+                ? watchedColor
+                : scheme.onSurfaceVariant,
           ),
         ),
       ),

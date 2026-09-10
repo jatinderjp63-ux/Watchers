@@ -481,9 +481,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   }
 
   Widget _buildOverviewSkeleton() {
-    return const Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+      children: const [
         _SkeletonLine(width: double.infinity),
         SizedBox(height: 8),
         _SkeletonLine(width: double.infinity),
@@ -1009,7 +1009,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                         selected: isWatched,
                         onPressed: () async {
                           await _ensureShowInProgress();
-                          await notifier.toggleSingleEpisodeWatched(
+                          await notifier.toggleEpisodeWatchedInSeason(
                             tvId: widget.show.id,
                             seasonNumber: selectedSeason,
                             episodeNumber: episodeNumber,

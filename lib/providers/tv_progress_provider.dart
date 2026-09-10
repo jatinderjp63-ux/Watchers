@@ -411,6 +411,122 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
 
+  /// Mark an episode and all earlier released episodes **in the same season**
+  /// as watched. This is Step 1 of the "mark previous episodes" feature.
+  Future<void> markWatchedUpToEpisodeInSeason({
+    required int tvId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    debugPrint('TvProgressNotifier: markWatchedUpToEpisodeInSeason called: tvId=$tvId, S$seasonNumber E$episodeNumber');
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisodeInSeason: no progress found for tvId=$tvId');
+      return;
+    }
+
+
+    final snapshot = await _buildSnapshot(progress);
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisodeInSeason: no released episodes for tvId=$tvId');
+      return;
+    }
+
+
+    // Filter to only released episodes in the target season
+    final seasonReleased = snapshot.releasedEpisodes
+        .where((ep) => ep.seasonNumber == seasonNumber)
+        .toList();
+
+
+    if (seasonReleased.isEmpty) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisodeInSeason: no released episodes in season $seasonNumber');
+      return;
+    }
+
+
+    final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
+
+
+    int targetIndex = -1;
+    for (var i = 0; i < seasonReleased.length; i++) {
+      final ep = seasonReleased[i];
+      if (ep.key == targetKey) {
+        targetIndex = i;
+        break;
+      }
+    }
+
+
+    if (targetIndex < 0) {
+      debugPrint('TvProgressNotifier: markWatchedUpToEpisodeInSeason: target episode not found in season released list');
+      return;
+    }
+
+
+    final keys = {...snapshot.watchedKeys};
+
+
+    // Mark all released episodes in this season up to and including the target
+    for (var i = 0; i <= targetIndex; i++) {
+      keys.add(seasonReleased[i].key);
+    }
+
+
+    debugPrint('TvProgressNotifier: markWatchedUpToEpisodeInSeason: marking ${keys.length} episodes as watched (season-only)');
+    await _applyWatchedKeys(snapshot, keys);
+  }
+
+
+  /// Toggle a single episode's watched state in a season:
+  /// - If episode is unwatched: mark it and all earlier released episodes in that season.
+  /// - If episode is watched: unmark only that episode (no cascade for now).
+  Future<void> toggleEpisodeWatchedInSeason({
+    required int tvId,
+    required int seasonNumber,
+    required int episodeNumber,
+  }) async {
+    debugPrint('TvProgressNotifier: toggleEpisodeWatchedInSeason called: tvId=$tvId, S$seasonNumber E$episodeNumber');
+    final progress = getShowById(tvId);
+    if (progress == null) {
+      debugPrint('TvProgressNotifier: toggleEpisodeWatchedInSeason: no progress found for tvId=$tvId');
+      return;
+    }
+
+    final snapshot = await _buildSnapshot(progress);
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint('TvProgressNotifier: toggleEpisodeWatchedInSeason: no released episodes for tvId=$tvId');
+      return;
+    }
+
+    final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
+    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(targetKey);
+
+    if (isCurrentlyWatched) {
+      // Unmark only this episode
+      final newKeys = {...progress.watchedEpisodeKeys};
+      newKeys.remove(targetKey);
+
+      final updated = progress.copyWith(
+        watchedEpisodeKeys: newKeys,
+        watchedEpisodes: newKeys.length,
+      );
+
+      _replaceShow(_normalizeShow(updated));
+      await _save();
+
+      debugPrint('TvProgressNotifier: toggleEpisodeWatchedInSeason: unmarked episode $targetKey');
+    } else {
+      // Mark this episode and all earlier released episodes in this season
+      await markWatchedUpToEpisodeInSeason(
+        tvId: tvId,
+        seasonNumber: seasonNumber,
+        episodeNumber: episodeNumber,
+      );
+    }
+  }
+
+
   /// Unmark an episode and all later released episodes (across all seasons)
   /// as unwatched.
   Future<void> markUnwatchedFromEpisode({
@@ -695,7 +811,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
         snapshot.allEpisodes,
         fallback: existing.totalSeasons,
       ),
-            watchedEpisodeKeys: keys,
+      watchedEpisodeKeys: keys,
       clearLastWatchedAt: keys.isEmpty,
       lastWatchedAt: keys.isEmpty ? null : DateTime.now(),
     );

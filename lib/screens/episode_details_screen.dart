@@ -197,68 +197,15 @@ class _EpisodeDetailsScreenState extends ConsumerState<EpisodeDetailsScreen> {
   }
 
   Future<void> _toggleWatched() async {
-    debugPrint('===== TOGGLE WATCHED START =====');
-    
     await _ensureShowInProgress();
 
     final notifier = ref.read(tvProgressProvider.notifier);
     
-    // Check current state
-    final progressItems = ref.read(tvProgressProvider);
-    debugPrint('Progress items count: ${progressItems.length}');
-    
-    final progress = progressItems.where((item) => item.id == widget.show.id).firstOrNull;
-    debugPrint('Progress found: ${progress != null}');
-    
-    if (progress == null) {
-      debugPrint('ERROR: No progress found for show ${widget.show.id}');
-      return;
-    }
-    
-    final episodeKey = '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
-    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(episodeKey);
-    
-    debugPrint('Episode key: $episodeKey');
-    debugPrint('Currently watched: $isCurrentlyWatched');
-    debugPrint('Current watchedEpisodeKeys: ${progress.watchedEpisodeKeys}');
-    
-    if (isCurrentlyWatched) {
-      // Unmark this episode
-      final newKeys = {...progress.watchedEpisodeKeys};
-      newKeys.remove(episodeKey);
-      
-      debugPrint('Removing key, new keys: $newKeys');
-      
-      final updated = progress.copyWith(
-        watchedEpisodeKeys: newKeys,
-        watchedEpisodes: newKeys.length,
-      );
-      
-      debugPrint('Calling updateShow...');
-      await notifier.updateShow(updated);
-      debugPrint('updateShow completed');
-    } else {
-      // Mark this episode
-      final newKeys = {...progress.watchedEpisodeKeys};
-      newKeys.add(episodeKey);
-      
-      debugPrint('Adding key, new keys: $newKeys');
-      
-      final updated = progress.copyWith(
-        watchedEpisodeKeys: newKeys,
-        watchedEpisodes: newKeys.length,
-      );
-      
-      debugPrint('Calling updateShow...');
-      await notifier.updateShow(updated);
-      debugPrint('updateShow completed');
-    }
-    
-    // Read state after update
-    final afterUpdate = ref.read(tvProgressProvider);
-    final afterProgress = afterUpdate.where((item) => item.id == widget.show.id).firstOrNull;
-    debugPrint('After update - watchedEpisodeKeys: ${afterProgress?.watchedEpisodeKeys}');
-    debugPrint('===== TOGGLE WATCHED END =====');
+    await notifier.toggleEpisodeWatchedInSeason(
+      tvId: widget.show.id,
+      seasonNumber: widget.seasonNumber,
+      episodeNumber: widget.episodeNumber,
+    );
   }
 
   Widget _buildStillImage(ColorScheme scheme) {
@@ -300,24 +247,12 @@ class _EpisodeDetailsScreenState extends ConsumerState<EpisodeDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('===== BUILD START =====');
-    
     final scheme = Theme.of(context).colorScheme;
     
-    // Watch provider and get current watched state
     final progressItems = ref.watch(tvProgressProvider);
-    debugPrint('Build - progress items count: ${progressItems.length}');
-    
     final progress = progressItems.where((item) => item.id == widget.show.id).firstOrNull;
-    debugPrint('Build - progress found: ${progress != null}');
-    
     final episodeKey = '${widget.show.id}:s${widget.seasonNumber}e${widget.episodeNumber}';
     final isWatched = progress?.watchedEpisodeKeys.contains(episodeKey) ?? false;
-    
-    debugPrint('Build - episode key: $episodeKey');
-    debugPrint('Build - is watched: $isWatched');
-    debugPrint('Build - watchedEpisodeKeys: ${progress?.watchedEpisodeKeys}');
-    debugPrint('===== BUILD END =====');
 
     return Scaffold(
       body: CustomScrollView(

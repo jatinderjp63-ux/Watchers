@@ -573,8 +573,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
-    final isCurrentlyWatched =
-        progress.watchedEpisodeKeys.contains(targetKey);
+    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(targetKey);
 
     if (isCurrentlyWatched) {
       final newKeys = {...progress.watchedEpisodeKeys};
@@ -638,8 +637,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     }
 
     final targetKey = '$tvId:s${seasonNumber}e$episodeNumber';
-    final isCurrentlyWatched =
-        progress.watchedEpisodeKeys.contains(targetKey);
+    final isCurrentlyWatched = progress.watchedEpisodeKeys.contains(targetKey);
 
     if (isCurrentlyWatched) {
       final newKeys = {...progress.watchedEpisodeKeys};
@@ -789,8 +787,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
       if (isLaterSeason) {
         keys.remove(episode.key);
-      } else if (isCurrentSeason &&
-          episode.episodeNumber >= episodeNumber) {
+      } else if (isCurrentSeason && episode.episodeNumber >= episodeNumber) {
         keys.remove(episode.key);
       }
     }
@@ -937,6 +934,68 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
         episodeNumber: episodeNumber,
       );
     }
+  }
+
+  /// Mark all released episodes in the selected season and every previous
+  /// season as watched.
+  ///
+  /// Future seasons remain unchanged. Unreleased episodes remain unchanged.
+  Future<void> markSeasonWatchedIncludingPreviousSeasons({
+    required int tvId,
+    required int seasonNumber,
+  }) async {
+    debugPrint(
+      'TvProgressNotifier: markSeasonWatchedIncludingPreviousSeasons called: '
+      'tvId=$tvId, season=$seasonNumber',
+    );
+
+    final progress = getShowById(tvId);
+
+    if (progress == null) {
+      debugPrint(
+        'TvProgressNotifier: markSeasonWatchedIncludingPreviousSeasons: '
+        'no progress found for tvId=$tvId',
+      );
+      return;
+    }
+
+    final snapshot = await _buildSnapshot(progress);
+
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint(
+        'TvProgressNotifier: markSeasonWatchedIncludingPreviousSeasons: '
+        'no released episodes for tvId=$tvId',
+      );
+      return;
+    }
+
+    final seasonReleased = snapshot.releasedEpisodes
+        .where((episode) => episode.seasonNumber == seasonNumber)
+        .toList();
+
+    if (seasonReleased.isEmpty) {
+      debugPrint(
+        'TvProgressNotifier: markSeasonWatchedIncludingPreviousSeasons: '
+        'no released episodes in season $seasonNumber',
+      );
+      return;
+    }
+
+    final keys = {...snapshot.watchedKeys};
+
+    for (final episode in snapshot.releasedEpisodes) {
+      if (episode.seasonNumber <= seasonNumber) {
+        keys.add(episode.key);
+      }
+    }
+
+    debugPrint(
+      'TvProgressNotifier: markSeasonWatchedIncludingPreviousSeasons: '
+      'marking released episodes through season $seasonNumber; '
+      'resulting watched count=${keys.length}',
+    );
+
+    await _applyWatchedKeys(snapshot, keys);
   }
 
   /// Season button interaction:
@@ -1110,9 +1169,8 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
       'rawKeys count=${rawKeys.length}',
     );
 
-    final allowedKeys = snapshot.allEpisodes
-        .map((episode) => episode.key)
-        .toSet();
+    final allowedKeys =
+        snapshot.allEpisodes.map((episode) => episode.key).toSet();
 
     final keys = rawKeys.where(allowedKeys.contains).toSet();
 
@@ -1130,9 +1188,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
         .where((episode) => keys.contains(episode.key))
         .toList();
 
-    final lastWatched = watchedReleased.isEmpty
-        ? null
-        : watchedReleased.last;
+    final lastWatched = watchedReleased.isEmpty ? null : watchedReleased.last;
 
     final existing = snapshot.progress;
 
@@ -1338,15 +1394,12 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
   TvProgress _normalizeShow(TvProgress show) {
     // Accept both old format (108978:1:2) and new format (108978:s1e2).
-    final safeKeys = show.watchedEpisodeKeys
-        .where(_isEpisodeKey)
-        .toSet();
+    final safeKeys = show.watchedEpisodeKeys.where(_isEpisodeKey).toSet();
 
     return show.copyWith(
       currentSeason: show.currentSeason < 1 ? 1 : show.currentSeason,
       currentEpisode: show.currentEpisode < 1 ? 1 : show.currentEpisode,
-      watchedEpisodes:
-          show.watchedEpisodes < 0 ? 0 : show.watchedEpisodes,
+      watchedEpisodes: show.watchedEpisodes < 0 ? 0 : show.watchedEpisodes,
       totalEpisodes: show.totalEpisodes < 0 ? 0 : show.totalEpisodes,
       totalSeasons: show.totalSeasons < 0 ? 0 : show.totalSeasons,
       watchedEpisodeKeys: safeKeys,
@@ -1378,10 +1431,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
       final season = int.tryParse(eParts[0].substring(1));
       final episode = int.tryParse(eParts[1]);
 
-      return season != null &&
-          episode != null &&
-          season > 0 &&
-          episode > 0;
+      return season != null && episode != null && season > 0 && episode > 0;
     }
 
     // Accept old format: 108978:1:2.

@@ -892,9 +892,9 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
               await _ensureShowInProgress();
 
               if (isSeasonWatched) {
-                await notifier.toggleSeasonWatched(
-                  widget.show.id,
-                  selectedSeason,
+                await notifier.markSeasonUnwatchedIncludingFutureSeasons(
+                  tvId: widget.show.id,
+                  seasonNumber: selectedSeason,
                 );
               } else {
                 await notifier.markSeasonWatchedIncludingPreviousSeasons(

@@ -998,6 +998,69 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
     await _applyWatchedKeys(snapshot, keys);
   }
 
+  /// Unmark all released episodes in the selected season and every future
+  /// season. Previous seasons remain unchanged.
+  ///
+  /// Unreleased episodes remain unchanged because only released episodes are
+  /// removed from the watched-key set.
+  Future<void> markSeasonUnwatchedIncludingFutureSeasons({
+    required int tvId,
+    required int seasonNumber,
+  }) async {
+    debugPrint(
+      'TvProgressNotifier: markSeasonUnwatchedIncludingFutureSeasons called: '
+      'tvId=$tvId, season=$seasonNumber',
+    );
+
+    final progress = getShowById(tvId);
+
+    if (progress == null) {
+      debugPrint(
+        'TvProgressNotifier: markSeasonUnwatchedIncludingFutureSeasons: '
+        'no progress found for tvId=$tvId',
+      );
+      return;
+    }
+
+    final snapshot = await _buildSnapshot(progress);
+
+    if (snapshot.releasedEpisodes.isEmpty) {
+      debugPrint(
+        'TvProgressNotifier: markSeasonUnwatchedIncludingFutureSeasons: '
+        'no released episodes for tvId=$tvId',
+      );
+      return;
+    }
+
+    final seasonReleased = snapshot.releasedEpisodes
+        .where((episode) => episode.seasonNumber == seasonNumber)
+        .toList();
+
+    if (seasonReleased.isEmpty) {
+      debugPrint(
+        'TvProgressNotifier: markSeasonUnwatchedIncludingFutureSeasons: '
+        'no released episodes in season $seasonNumber',
+      );
+      return;
+    }
+
+    final keys = {...snapshot.watchedKeys};
+
+    for (final episode in snapshot.releasedEpisodes) {
+      if (episode.seasonNumber >= seasonNumber) {
+        keys.remove(episode.key);
+      }
+    }
+
+    debugPrint(
+      'TvProgressNotifier: markSeasonUnwatchedIncludingFutureSeasons: '
+      'unmarked released episodes from season $seasonNumber onward; '
+      'resulting watched count=${keys.length}',
+    );
+
+    await _applyWatchedKeys(snapshot, keys);
+  }
+
   /// Season button interaction:
   /// - If all released episodes in the season are watched:
   ///   unmark all released episodes in that season.

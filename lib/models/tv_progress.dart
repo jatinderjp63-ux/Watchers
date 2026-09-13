@@ -102,9 +102,8 @@ class TvProgress {
       watchedEpisodes: watchedEpisodes ?? this.watchedEpisodes,
       totalEpisodes: totalEpisodes ?? this.totalEpisodes,
       totalSeasons: totalSeasons ?? this.totalSeasons,
-      lastWatchedAt: clearLastWatchedAt
-          ? null
-          : (lastWatchedAt ?? this.lastWatchedAt),
+      lastWatchedAt:
+          clearLastWatchedAt ? null : (lastWatchedAt ?? this.lastWatchedAt),
       watchedEpisodeKeys: clearWatchedEpisodeKeys
           ? const <String>{}
           : (watchedEpisodeKeys ?? this.watchedEpisodeKeys),
@@ -125,21 +124,16 @@ class TvProgress {
       id: json['id'] is int ? json['id'] as int : 0,
       title: json['title']?.toString() ?? 'Unknown Title',
       posterPath: json['posterPath']?.toString() ?? '',
-      currentSeason: json['currentSeason'] is int
-          ? json['currentSeason'] as int
-          : 1,
-      currentEpisode: json['currentEpisode'] is int
-          ? json['currentEpisode'] as int
-          : 1,
-      watchedEpisodes: json['watchedEpisodes'] is int
-          ? json['watchedEpisodes'] as int
-          : 0,
-      totalEpisodes: json['totalEpisodes'] is int
-          ? json['totalEpisodes'] as int
-          : 0,
-      totalSeasons: json['totalSeasons'] is int
-          ? json['totalSeasons'] as int
-          : 0,
+      currentSeason:
+          json['currentSeason'] is int ? json['currentSeason'] as int : 1,
+      currentEpisode:
+          json['currentEpisode'] is int ? json['currentEpisode'] as int : 1,
+      watchedEpisodes:
+          json['watchedEpisodes'] is int ? json['watchedEpisodes'] as int : 0,
+      totalEpisodes:
+          json['totalEpisodes'] is int ? json['totalEpisodes'] as int : 0,
+      totalSeasons:
+          json['totalSeasons'] is int ? json['totalSeasons'] as int : 0,
       lastWatchedAt: json['lastWatchedAt'] != null
           ? DateTime.tryParse(json['lastWatchedAt'].toString())
           : null,
@@ -172,12 +166,32 @@ class TvProgress {
 
     // Current provider format, for example:
     // 108978:s1e7
-    if (RegExp(r'^\d+:s\d+e\d+$').hasMatch(value)) {
-      return true;
+    final currentFormat = RegExp(r'^(\d+):s(\d+)e(\d+)$').firstMatch(value);
+
+    if (currentFormat != null) {
+      final tvId = int.tryParse(currentFormat.group(1)!);
+      final season = int.tryParse(currentFormat.group(2)!);
+      final episode = int.tryParse(currentFormat.group(3)!);
+
+      return tvId != null &&
+          season != null &&
+          episode != null &&
+          tvId > 0 &&
+          season > 0 &&
+          episode > 0;
     }
 
     // Legacy format, for example:
     // 1:7
-    return RegExp(r'^\d+:\d+$').hasMatch(value);
+    final legacyFormat = RegExp(r'^(\d+):(\d+)$').firstMatch(value);
+
+    if (legacyFormat == null) {
+      return false;
+    }
+
+    final season = int.tryParse(legacyFormat.group(1)!);
+    final episode = int.tryParse(legacyFormat.group(2)!);
+
+    return season != null && episode != null && season > 0 && episode > 0;
   }
 }

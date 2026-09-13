@@ -93,7 +93,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  EpisodeMarkingBehavior _decodeEpisodeMarkingBehavior(String? value) {
+  EpisodeMarkingBehavior _decodeEpisodeMarkingBehavior(
+    String? value,
+  ) {
     switch (value) {
       case 'onlyThisEpisode':
         return EpisodeMarkingBehavior.onlyThisEpisode;
@@ -105,7 +107,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  EpisodeUnmarkingBehavior _decodeEpisodeUnmarkingBehavior(String? value) {
+  EpisodeUnmarkingBehavior _decodeEpisodeUnmarkingBehavior(
+    String? value,
+  ) {
     switch (value) {
       case 'onlyThisEpisode':
         return EpisodeUnmarkingBehavior.onlyThisEpisode;
@@ -117,7 +121,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  SeasonMarkingBehavior _decodeSeasonMarkingBehavior(String? value) {
+  SeasonMarkingBehavior _decodeSeasonMarkingBehavior(
+    String? value,
+  ) {
     switch (value) {
       case 'onlyThisSeason':
         return SeasonMarkingBehavior.onlyThisSeason;
@@ -129,7 +135,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  SeasonUnmarkingBehavior _decodeSeasonUnmarkingBehavior(String? value) {
+  SeasonUnmarkingBehavior _decodeSeasonUnmarkingBehavior(
+    String? value,
+  ) {
     switch (value) {
       case 'onlyThisSeason':
         return SeasonUnmarkingBehavior.onlyThisSeason;
@@ -141,7 +149,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  String _encodeEpisodeMarkingBehavior(EpisodeMarkingBehavior value) {
+  String _encodeEpisodeMarkingBehavior(
+    EpisodeMarkingBehavior value,
+  ) {
     switch (value) {
       case EpisodeMarkingBehavior.previousReleased:
         return 'previousReleased';
@@ -152,7 +162,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  String _encodeEpisodeUnmarkingBehavior(EpisodeUnmarkingBehavior value) {
+  String _encodeEpisodeUnmarkingBehavior(
+    EpisodeUnmarkingBehavior value,
+  ) {
     switch (value) {
       case EpisodeUnmarkingBehavior.laterReleased:
         return 'laterReleased';
@@ -163,7 +175,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  String _encodeSeasonMarkingBehavior(SeasonMarkingBehavior value) {
+  String _encodeSeasonMarkingBehavior(
+    SeasonMarkingBehavior value,
+  ) {
     switch (value) {
       case SeasonMarkingBehavior.previousReleased:
         return 'previousReleased';
@@ -174,7 +188,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     }
   }
 
-  String _encodeSeasonUnmarkingBehavior(SeasonUnmarkingBehavior value) {
+  String _encodeSeasonUnmarkingBehavior(
+    SeasonUnmarkingBehavior value,
+  ) {
     switch (value) {
       case SeasonUnmarkingBehavior.laterReleased:
         return 'laterReleased';
@@ -187,67 +203,107 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   void toggleDarkMode(bool enabled) {
     final newMode = enabled ? ThemeMode.dark : ThemeMode.light;
+
     state = state.copyWith(themeMode: newMode);
+
     _saveThemeMode(newMode);
   }
 
   void setThemeMode(ThemeMode mode) {
     final fixedMode = mode == ThemeMode.dark ? ThemeMode.dark : ThemeMode.light;
+
     state = state.copyWith(themeMode: fixedMode);
+
     _saveThemeMode(fixedMode);
   }
 
   void setNotificationsEnabled(bool enabled) {
-    state = state.copyWith(notificationsEnabled: enabled);
+    state = state.copyWith(
+      notificationsEnabled: enabled,
+    );
+
     _saveNotifications(enabled);
   }
 
-  void setEpisodeMarkingBehavior(EpisodeMarkingBehavior behavior) {
+  void setEpisodeMarkingBehavior(
+    EpisodeMarkingBehavior behavior,
+  ) {
     final updated = state.watchProgressSettings.copyWith(
       episodeMarking: behavior,
     );
-    state = state.copyWith(watchProgressSettings: updated);
+
+    state = state.copyWith(
+      watchProgressSettings: updated,
+    );
+
     _saveEpisodeMarkingBehavior(behavior);
   }
 
-  void setEpisodeUnmarkingBehavior(EpisodeUnmarkingBehavior behavior) {
+  void setEpisodeUnmarkingBehavior(
+    EpisodeUnmarkingBehavior behavior,
+  ) {
     final updated = state.watchProgressSettings.copyWith(
       episodeUnmarking: behavior,
     );
-    state = state.copyWith(watchProgressSettings: updated);
+
+    state = state.copyWith(
+      watchProgressSettings: updated,
+    );
+
     _saveEpisodeUnmarkingBehavior(behavior);
   }
 
-  void setSeasonMarkingBehavior(SeasonMarkingBehavior behavior) {
+  void setSeasonMarkingBehavior(
+    SeasonMarkingBehavior behavior,
+  ) {
     final updated = state.watchProgressSettings.copyWith(
       seasonMarking: behavior,
     );
-    state = state.copyWith(watchProgressSettings: updated);
+
+    state = state.copyWith(
+      watchProgressSettings: updated,
+    );
+
     _saveSeasonMarkingBehavior(behavior);
   }
 
-  void setSeasonUnmarkingBehavior(SeasonUnmarkingBehavior behavior) {
+  void setSeasonUnmarkingBehavior(
+    SeasonUnmarkingBehavior behavior,
+  ) {
     final updated = state.watchProgressSettings.copyWith(
       seasonUnmarking: behavior,
     );
-    state = state.copyWith(watchProgressSettings: updated);
+
+    state = state.copyWith(
+      watchProgressSettings: updated,
+    );
+
     _saveSeasonUnmarkingBehavior(behavior);
   }
 
   Future<void> _saveThemeMode(ThemeMode mode) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_themeKey, _encodeThemeMode(mode));
+
+    await prefs.setString(
+      _themeKey,
+      _encodeThemeMode(mode),
+    );
   }
 
   Future<void> _saveNotifications(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_notificationsKey, enabled);
+
+    await prefs.setBool(
+      _notificationsKey,
+      enabled,
+    );
   }
 
   Future<void> _saveEpisodeMarkingBehavior(
     EpisodeMarkingBehavior behavior,
   ) async {
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setString(
       _episodeMarkingKey,
       _encodeEpisodeMarkingBehavior(behavior),
@@ -258,6 +314,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     EpisodeUnmarkingBehavior behavior,
   ) async {
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setString(
       _episodeUnmarkingKey,
       _encodeEpisodeUnmarkingBehavior(behavior),
@@ -268,6 +325,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     SeasonMarkingBehavior behavior,
   ) async {
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setString(
       _seasonMarkingKey,
       _encodeSeasonMarkingBehavior(behavior),
@@ -278,6 +336,7 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     SeasonUnmarkingBehavior behavior,
   ) async {
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setString(
       _seasonUnmarkingKey,
       _encodeSeasonUnmarkingBehavior(behavior),

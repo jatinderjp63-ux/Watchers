@@ -53,7 +53,9 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ],
             onChanged: (value) {
-              if (value != null) notifier.setEpisodeMarkingBehavior(value);
+              if (value != null) {
+                notifier.setEpisodeMarkingBehavior(value);
+              }
             },
           ),
           const SizedBox(height: 12),
@@ -75,7 +77,9 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ],
             onChanged: (value) {
-              if (value != null) notifier.setEpisodeUnmarkingBehavior(value);
+              if (value != null) {
+                notifier.setEpisodeUnmarkingBehavior(value);
+              }
             },
           ),
           const SizedBox(height: 12),
@@ -97,7 +101,9 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ],
             onChanged: (value) {
-              if (value != null) notifier.setSeasonMarkingBehavior(value);
+              if (value != null) {
+                notifier.setSeasonMarkingBehavior(value);
+              }
             },
           ),
           const SizedBox(height: 12),
@@ -119,7 +125,9 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ],
             onChanged: (value) {
-              if (value != null) notifier.setSeasonUnmarkingBehavior(value);
+              if (value != null) {
+                notifier.setSeasonUnmarkingBehavior(value);
+              }
             },
           ),
         ],

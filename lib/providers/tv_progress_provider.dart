@@ -6,6 +6,14 @@ import '../services/tmdb_service.dart';
 import '../services/tv_progress_service.dart';
 import 'tmdb_service_provider.dart';
 
+typedef TvProgressLoad = Future<List<TvProgress>> Function();
+typedef TvProgressSave = Future<void> Function(List<TvProgress> shows);
+typedef TvSeasonCountLoader = Future<int> Function(int tvId);
+typedef TvSeasonEpisodesLoader = Future<List<Map<String, dynamic>>> Function(
+  int tvId,
+  int seasonNumber,
+);
+
 final tvProgressServiceProvider = Provider<TvProgressService>((ref) {
   return TvProgressService();
 });
@@ -160,18 +168,34 @@ class TvProgressSnapshot {
 }
 
 class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
-  TvProgressNotifier(this._service, this._tmdbService) : super([]) {
+  TvProgressNotifier(
+    this._service,
+    this._tmdbService, {
+    TvProgressLoad? loadProgress,
+    TvProgressSave? saveProgress,
+    TvSeasonCountLoader? loadSeasonCount,
+    TvSeasonEpisodesLoader? loadSeasonEpisodes,
+  })  : _loadProgress = loadProgress,
+        _saveProgress = saveProgress,
+        _loadSeasonCount = loadSeasonCount,
+        _loadSeasonEpisodes = loadSeasonEpisodes,
+        super([]) {
     load();
   }
 
   final TvProgressService _service;
   final TmdbService _tmdbService;
 
+  final TvProgressLoad? _loadProgress;
+  final TvProgressSave? _saveProgress;
+  final TvSeasonCountLoader? _loadSeasonCount;
+  final TvSeasonEpisodesLoader? _loadSeasonEpisodes;
+
   final Map<int, Future<List<TvEpisodePosition>>> _catalogRequests = {};
   final Map<int, List<TvEpisodePosition>> _catalogCache = {};
 
   Future<void> load() async {
-    state = await _service.load();
+    state = await (_loadProgress ?? _service.load)();
   }
 
   Future<void> addShow(TvProgress show) async {
@@ -1463,7 +1487,9 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
     for (var season = 1; season <= totalSeasons; season++) {
       try {
-        final episodes = await _tmdbService.getSeasonEpisodes(
+        final episodes = await (_loadSeasonEpisodes ??
+            (int id, int seasonNumber) =>
+                _tmdbService.getSeasonEpisodes(id, seasonNumber))(
           tvId,
           season,
         );
@@ -1505,6 +1531,10 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
   }
 
   Future<int> _discoverSeasonCount(int tvId) async {
+    if (_loadSeasonCount != null) {
+      return _loadSeasonCount!(tvId);
+    }
+
     try {
       final raw = await _tmdbService.getRawTvMetadata(tvId);
       final value = raw['number_of_seasons'];
@@ -1663,7 +1693,7 @@ class TvProgressNotifier extends StateNotifier<List<TvProgress>> {
 
   Future<void> _save() async {
     try {
-      await _service.save(state);
+      await (_saveProgress ?? _service.save)(state);
     } catch (error) {
       debugPrint('TvProgressNotifier: TV progress save error: $error');
     }

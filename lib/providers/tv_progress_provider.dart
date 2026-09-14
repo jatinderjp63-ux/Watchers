@@ -88,6 +88,26 @@ class TvProgressSnapshot {
     return watchedReleased.last;
   }
 
+  TvEpisodePosition? get lastWatchedAnyEpisode {
+    final watched = allEpisodes
+        .where((episode) => watchedKeys.contains(episode.key))
+        .toList();
+
+    if (watched.isEmpty) {
+      return null;
+    }
+
+    watched.sort((a, b) {
+      if (a.seasonNumber != b.seasonNumber) {
+        return a.seasonNumber.compareTo(b.seasonNumber);
+      }
+
+      return a.episodeNumber.compareTo(b.episodeNumber);
+    });
+
+    return watched.last;
+  }
+
   /// The first unwatched dated episode released before today.
   TvEpisodePosition? get nextUnwatchedPastEpisode {
     final today = _todayOnly();

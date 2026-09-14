@@ -19,6 +19,7 @@ import '../services/metadata_refresh_service.dart';
 import '../services/retry_helper.dart';
 import '../services/tmdb_service.dart';
 import '../providers/tv_progress_provider.dart';
+import '../providers/tv_display_status.dart';
 import 'episode_details_screen.dart';
 
 class TvDetailsScreen extends ConsumerStatefulWidget {
@@ -55,6 +56,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   int _tvAboutSection = 0;
   int? _selectedSeason;
   Future<MediaLibraryItem?>? _itemFuture;
+  TvProgressSnapshot? _statusSnapshot;
+  bool _statusSnapshotLoading = false;
 
   final Map<String, int> _episodeCountCache = {};
 
@@ -84,6 +87,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
 
     _itemFuture = _libraryService.getItem(widget.show.id);
     _loadDetails();
+    _refreshStatusSnapshot();
   }
 
   Future<void> _loadDetails({
@@ -315,6 +319,33 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
     }
   }
 
+  Future<void> _refreshStatusSnapshot() async {
+    final notifier = ref.read(tvProgressProvider.notifier);
+
+    if (mounted) {
+      setState(() {
+        _statusSnapshotLoading = true;
+      });
+    }
+
+    final snapshot = await notifier.getSnapshotForShow(
+      id: widget.show.id,
+      title: widget.show.title,
+      posterPath: widget.show.posterPath,
+      totalEpisodes: details?.totalEpisodes ?? 0,
+      totalSeasons: details?.totalSeasons ?? 0,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _statusSnapshot = snapshot;
+      _statusSnapshotLoading = false;
+    });
+  }
+
   Future<void> _changeShowStatus(MediaStatus status) async {
     final existing = await _libraryService.getItem(widget.show.id);
 
@@ -326,11 +357,29 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       await _libraryService.updateStatus(widget.show.id, status);
     }
 
-    if (!mounted) return;
+    if (status == MediaStatus.watched && existing?.status != status) {
+      final notifier = ref.read(tvProgressProvider.notifier);
+
+      await notifier.ensureShow(
+        id: widget.show.id,
+        title: widget.show.title,
+        posterPath: widget.show.posterPath,
+        totalEpisodes: details?.totalEpisodes ?? 0,
+        totalSeasons: details?.totalSeasons ?? 0,
+      );
+
+      await notifier.markAllReleasedEpisodesWatched(widget.show.id);
+    }
+
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       _itemFuture = _libraryService.getItem(widget.show.id);
     });
+
+    await _refreshStatusSnapshot();
   }
 
   Future<void> _loadSeasonEpisodes(int seasonNumber) async {
@@ -389,48 +438,90 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       builder: (context, snapshot) {
         final currentStatus = snapshot.data?.status;
 
+        final displayStatus = resolveTvDisplayStatus(
+          manualStatus: currentStatus ?? MediaStatus.planning,
+          snapshot: _statusSnapshot,
+        );
+
+        final isPlanned = displayStatus == TvDisplayStatus.planned;
+        final isWatched = displayStatus == TvDisplayStatus.watched;
+        final isDropped = displayStatus == TvDisplayStatus.dropped;
+
         Widget makeButton({
           required String label,
           required IconData icon,
           required MediaStatus status,
           required Color color,
+          required bool selected,
         }) {
           return _PremiumStatusButton(
             label: label,
             icon: icon,
-            selected: currentStatus == status,
+            selected: selected,
             selectedColor: color,
             onPressed: () => _changeShowStatus(status),
           );
         }
 
-        return Row(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: makeButton(
-                label: 'Planned',
-                icon: Icons.bookmark_add_outlined,
-                status: MediaStatus.planning,
-                color: const Color(0xFF4C8BF5),
+            if (displayStatus == TvDisplayStatus.watching)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.play_circle_outline_rounded,
+                      color: Color(0xFFE0A93A),
+                      size: 17,
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      _statusSnapshotLoading
+                          ? 'Updating progress…'
+                          : 'Watching',
+                      style: const TextStyle(
+                        color: Color(0xFFE0A93A),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: makeButton(
-                label: 'Watched',
-                icon: Icons.check_circle_outline,
-                status: MediaStatus.watched,
-                color: const Color(0xFF2EAF62),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: makeButton(
-                label: 'Dropped',
-                icon: Icons.close_outlined,
-                status: MediaStatus.dropped,
-                color: const Color(0xFFB00020),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: makeButton(
+                    label: 'Planned',
+                    icon: Icons.bookmark_add_outlined,
+                    status: MediaStatus.planning,
+                    color: const Color(0xFF4C8BF5),
+                    selected: isPlanned,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: makeButton(
+                    label: 'Watched',
+                    icon: Icons.check_circle_outline,
+                    status: MediaStatus.watched,
+                    color: const Color(0xFF2EAF62),
+                    selected: isWatched,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: makeButton(
+                    label: 'Dropped',
+                    icon: Icons.close_outlined,
+                    status: MediaStatus.dropped,
+                    color: const Color(0xFFB00020),
+                    selected: isDropped,
+                  ),
+                ),
+              ],
             ),
           ],
         );
@@ -924,12 +1015,14 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                       tvId: widget.show.id,
                       seasonNumber: selectedSeason,
                     );
+                    await _refreshStatusSnapshot();
                     break;
                   case SeasonMarkingBehavior.onlyThisSeason:
                     await notifier.markSingleSeasonWatched(
                       tvId: widget.show.id,
                       seasonNumber: selectedSeason,
                     );
+                    await _refreshStatusSnapshot();
                     break;
                   case SeasonMarkingBehavior.askEveryTime:
                     await _showSeasonMarkingSheet(
@@ -1087,6 +1180,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                                   seasonNumber: selectedSeason,
                                   episodeNumber: episodeNumber,
                                 );
+                                await _refreshStatusSnapshot();
                                 break;
                               case EpisodeUnmarkingBehavior.onlyThisEpisode:
                                 await notifier.markSingleEpisodeUnwatched(
@@ -1094,6 +1188,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                                   seasonNumber: selectedSeason,
                                   episodeNumber: episodeNumber,
                                 );
+                                await _refreshStatusSnapshot();
                                 break;
                               case EpisodeUnmarkingBehavior.askEveryTime:
                                 await _showEpisodeUnmarkingSheet(
@@ -1113,6 +1208,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                                   seasonNumber: selectedSeason,
                                   episodeNumber: episodeNumber,
                                 );
+                                await _refreshStatusSnapshot();
                                 break;
                               case EpisodeMarkingBehavior.onlyThisEpisode:
                                 await notifier.markSingleEpisodeWatched(
@@ -1120,6 +1216,7 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
                                   seasonNumber: selectedSeason,
                                   episodeNumber: episodeNumber,
                                 );
+                                await _refreshStatusSnapshot();
                                 break;
                               case EpisodeMarkingBehavior.askEveryTime:
                                 await _showEpisodeMarkingSheet(
@@ -1267,6 +1364,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
         seasonNumber: seasonNumber,
       );
     }
+
+    await _refreshStatusSnapshot();
   }
 
   Future<void> _showSeasonUnmarkingSheet({
@@ -1307,6 +1406,8 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
         seasonNumber: seasonNumber,
       );
     }
+
+    await _refreshStatusSnapshot();
   }
 
   Future<_WatchChoice?> _showWatchChoiceSheet({

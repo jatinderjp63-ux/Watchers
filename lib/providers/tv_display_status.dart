@@ -27,7 +27,6 @@ extension TvDisplayStatusLabel on TvDisplayStatus {
       case TvDisplayStatus.planned:
         return MediaStatus.planning;
       case TvDisplayStatus.watching:
-        return MediaStatus.watched;
       case TvDisplayStatus.watched:
         return MediaStatus.watched;
       case TvDisplayStatus.dropped:

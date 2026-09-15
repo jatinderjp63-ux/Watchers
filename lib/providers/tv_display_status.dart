@@ -39,12 +39,14 @@ TvDisplayStatus resolveTvDisplayStatus({
   required MediaStatus manualStatus,
   required TvProgressSnapshot? snapshot,
 }) {
-  if (manualStatus == MediaStatus.dropped) {
-    return TvDisplayStatus.dropped;
+  if (snapshot == null || snapshot.watchedKeys.isEmpty) {
+    return manualStatus == MediaStatus.dropped
+        ? TvDisplayStatus.dropped
+        : TvDisplayStatus.planned;
   }
 
-  if (snapshot == null || snapshot.watchedKeys.isEmpty) {
-    return TvDisplayStatus.planned;
+  if (manualStatus == MediaStatus.dropped) {
+    return TvDisplayStatus.dropped;
   }
 
   final lastWatched = _lastWatchedAnyEpisode(snapshot);

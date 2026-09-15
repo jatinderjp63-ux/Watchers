@@ -6,14 +6,12 @@ import '../models/movie.dart';
 import '../services/media_library_service.dart';
 import 'tv_progress_provider.dart';
 
-final mediaLibraryServiceProvider =
-    Provider<MediaLibraryService>((ref) {
+final mediaLibraryServiceProvider = Provider<MediaLibraryService>((ref) {
   return MediaLibraryService();
 });
 
-final libraryProvider = StateNotifierProvider<
-    LibraryNotifier,
-    List<MediaLibraryItem>>((ref) {
+final libraryProvider =
+    StateNotifierProvider<LibraryNotifier, List<MediaLibraryItem>>((ref) {
   final service = ref.watch(
     mediaLibraryServiceProvider,
   );
@@ -21,8 +19,7 @@ final libraryProvider = StateNotifierProvider<
   return LibraryNotifier(service, ref);
 });
 
-class LibraryNotifier
-    extends StateNotifier<List<MediaLibraryItem>> {
+class LibraryNotifier extends StateNotifier<List<MediaLibraryItem>> {
   LibraryNotifier(this._service, this._ref) : super([]) {
     MediaLibraryService.libraryChanges.addListener(
       _handleExternalLibraryChange,
@@ -59,26 +56,23 @@ class LibraryNotifier
     await loadLibrary();
   }
 
-  Future<void> updateStatus(
+    Future<void> updateStatus(
     int id,
     MediaStatus status,
   ) async {
-    final item = getItemById(id);
-    final oldStatus = item?.status;
+    final item = await _service.getItem(id);
 
-    await _service.updateStatus(
-      id,
-      status,
-    );
+    if (item == null) {
+      return;
+    }
 
-    // When a TV show's status becomes Watched, mark all released episodes watched.
-    if (item != null &&
-        item.mediaType == 'tv' &&
+    final oldStatus = item.status;
+
+    if (item.mediaType == 'tv' &&
         status == MediaStatus.watched &&
         oldStatus != MediaStatus.watched) {
       final tvNotifier = _ref.read(tvProgressProvider.notifier);
 
-      // Ensure the progress record exists
       await tvNotifier.ensureShow(
         id: id,
         title: item.title,
@@ -89,6 +83,8 @@ class LibraryNotifier
 
       await tvNotifier.markAllReleasedEpisodesWatched(id);
     }
+
+    await _service.updateStatus(id, status);
 
     await loadLibrary();
   }
@@ -158,9 +154,7 @@ class LibraryNotifier
   ) {
     return state
         .where(
-          (item) =>
-              item.mediaType == mediaType &&
-              item.status == status,
+          (item) => item.mediaType == mediaType && item.status == status,
         )
         .toList();
   }
@@ -173,6 +167,16 @@ class LibraryNotifier
     } catch (_) {
       return null;
     }
+  }
+
+  Future<MediaLibraryItem?> getItemByIdAsync(int id) async {
+    final storedItem = await _service.getItem(id);
+
+    if (storedItem != null) {
+      return storedItem;
+    }
+
+    return getItemById(id);
   }
 
   @override

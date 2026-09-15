@@ -19,6 +19,7 @@ import '../services/metadata_refresh_service.dart';
 import '../services/retry_helper.dart';
 import '../services/tmdb_service.dart';
 import '../providers/tv_progress_provider.dart';
+import '../providers/library_provider.dart';
 import '../providers/tv_display_status.dart';
 import 'episode_details_screen.dart';
 
@@ -347,37 +348,53 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
   }
 
   Future<void> _changeShowStatus(MediaStatus status) async {
-    final existing = await _libraryService.getItem(widget.show.id);
+    final libraryNotifier = ref.read(libraryProvider.notifier);
+    final existing = await libraryNotifier.getItemByIdAsync(widget.show.id);
 
     if (existing == null) {
-      await _libraryService.addMedia(widget.show, status);
+      await libraryNotifier.addMedia(widget.show, status);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _itemFuture = Future<MediaLibraryItem?>.value(
+          MediaLibraryItem(
+            id: widget.show.id,
+            title: widget.show.title,
+            posterPath: widget.show.posterPath,
+            backdropPath: widget.show.backdropPath,
+            mediaType: widget.show.mediaType,
+            status: status,
+            addedDate: DateTime.now(),
+            releaseDate: DateTime.tryParse(widget.show.releaseDate),
+          ),
+        );
+      });
     } else if (existing.status == status) {
-      await _libraryService.removeMedia(widget.show.id);
+      await libraryNotifier.removeMedia(widget.show.id);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _itemFuture = Future<MediaLibraryItem?>.value(null);
+      });
     } else {
-      await _libraryService.updateStatus(widget.show.id, status);
+      await libraryNotifier.updateStatus(widget.show.id, status);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _itemFuture = Future<MediaLibraryItem?>.value(
+          existing.copyWith(status: status),
+        );
+      });
     }
-
-    if (status == MediaStatus.watched && existing?.status != status) {
-      final notifier = ref.read(tvProgressProvider.notifier);
-
-      await notifier.ensureShow(
-        id: widget.show.id,
-        title: widget.show.title,
-        posterPath: widget.show.posterPath,
-        totalEpisodes: details?.totalEpisodes ?? 0,
-        totalSeasons: details?.totalSeasons ?? 0,
-      );
-
-      await notifier.markAllReleasedEpisodesWatched(widget.show.id);
-    }
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _itemFuture = _libraryService.getItem(widget.show.id);
-    });
 
     await _refreshStatusSnapshot();
   }
@@ -438,10 +455,12 @@ class _TvDetailsScreenState extends ConsumerState<TvDetailsScreen> {
       builder: (context, snapshot) {
         final currentStatus = snapshot.data?.status;
 
-        final displayStatus = resolveTvDisplayStatus(
-          manualStatus: currentStatus ?? MediaStatus.planning,
-          snapshot: _statusSnapshot,
-        );
+        final displayStatus = snapshot.data == null
+            ? null
+            : resolveTvDisplayStatus(
+                manualStatus: currentStatus!,
+                snapshot: _statusSnapshot,
+              );
 
         final isPlanned = displayStatus == TvDisplayStatus.planned;
         final isWatched = displayStatus == TvDisplayStatus.watched;
